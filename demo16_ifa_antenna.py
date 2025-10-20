@@ -56,7 +56,7 @@ via_size = 0.5 * mm
 
 wsub = 21 * mm         # substrate width
 hsub = 90 * mm         # substrate length
-th = 0.12 * mm         # substrate thickness
+th = 0.36 * mm         # substrate thickness
 Rair = 100 * mm         # air sphere radius
 
 # Refined frequency range for antenna resonance around 1.54–1.6 GHz
@@ -65,7 +65,7 @@ f2 = 3.5e9             # stop frequency
 
 # --- Create simulation object -------------------------------------------
 model = em.Simulation('PatchAntenna', loglevel='DEBUG')
-
+model.set_solver(em.EMSolver.CUDSS)
 model.check_version("1.1.0") # Checks version compatibility.
 
 # --- Define geometry primitives -----------------------------------------
@@ -139,7 +139,7 @@ model.mesher.set_face_size(port, 0.05 * mm)
 model.mesher.set_algorithm(em.Algorithm3D.HXT)
 model.generate_mesh()   
 # build the finite-element mesh
-model.view()
+#model.view()
 # model.view(selections=[port], plot_mesh=True)              # show the mesh around the port
 
 # --- Boundary conditions ------------------------------------------------
@@ -159,7 +159,7 @@ pec_selection = em.select(ifa,ground)
 # Assigning the boundary conditions
 abc = model.mw.bc.AbsorbingBoundary(boundary_selection)
 # --- Run frequency-domain solver ----------------------------------------
-data = model.mw.run_sweep()#multi_processing=True,n_workers=4)
+data = model.mw.run_sweep(multi_processing=True,n_workers=10)
 
 # --- Post-process S-parameters ------------------------------------------
 freqs = data.scalar.grid.freq
