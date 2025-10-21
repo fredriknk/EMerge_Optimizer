@@ -12,25 +12,25 @@ and far-field radiation patterns.
 
 This simulation is quite heavy and might take a while to fully compute.
 
-#############################################################
+############################################################################
 #|------------- substrate_width -------------------|
-# ________________________________________________     _ substrate_thickness
-#| A__ifa_te     |----------ifa_l(total length)-| |\   \-gndplane_position 
-#| V              _______________     __________| | |   \_0 point
-#|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  | | |_ mifa_meander_edge_distance 
-#|               |   |   ||  mifa_meander    |__| | |_ mifa_tipdistance
-#|               |   |   ||                   w2  | | |                  
-#|_______________|___|___||_______________________| |_|
-#| <---ifa_e---->| w1|   wf\                      | |
-#|               |_stub__|  \                     | |
-#|                       |    feed point          | |
-#|                       |                        | | substrate_length
-#|<-------ifa_fp-------->|                        | |
-#|                                                | |
-#|________________________________________________| |
-# \________________________________________________\|
-#############################################################
+# ___________________________________________________  _ substrate_thickness
+#| A__ifa_te     |----------ifa_l(total length)-|    |\   \-gndplane_position 
+#| V         ___  ______________________________|    | |   \_0 point
+#|           |   |    ___  _____________________| w3 | |
+#|         ifa_h |   |   ||                          | |                                 
+#|           |   |   |   ||                          | |                       
+#|           |   |   |   ||                          | |                    
+#|___________|___|___|___||__________________________| |    
+#| <---ifa_e---->| w1|   wf\                         | |
+#|               |_stub__|  \                        | |
+#|                       |    feed point             | |
+#|                       |                           | |                   
+#|<-------ifa_fp-------->|                           | |
+#|                                                   | |
+#|___________________________________________________| |
+# \___________________________________________________\|
+############################################################################
 
 
 """
@@ -40,16 +40,13 @@ mm = 0.001              # meters per millimeter
 
 # --- Antenna geometry dimensions ----------------------------------------
 
-ifa_h = 7 * mm
-ifa_h2 = 3 * mm
-ifa_l = 20.2 * mm
-ifa_l2 = 17 * mm
-ifa_w1 = 0.613 * mm
-ifa_w2 = 0.472 * mm
-ifa_wf = 0.425 * mm
-ifa_fp= 2.2 * mm
-ifa_stub = 1.71 * mm
-ifa_stub2 = 0.9 * mm
+ifa_h = 6.5 * mm
+ifa_l = 18.7 * mm
+ifa_w1 = 0.9 * mm
+ifa_w2 = 0.8 * mm
+ifa_wf = 0.8 * mm
+ifa_fp= 2.5 * mm
+ifa_stub = 2 * mm
 ifa_e = ifa_fp-ifa_stub
 ifa_te = 0.5 * mm
 via_size = 0.5 * mm
@@ -57,12 +54,11 @@ via_size = 0.5 * mm
 wsub = 22 * mm         # substrate width
 hsub = 40 * mm         # substrate length
 th = 1.5 * mm         # substrate thickness
-Rair = 100 * mm         # air sphere radius
 
 # Refined frequency range for antenna resonance around 1.54–1.6 GHz
-f1 = 2.0e9             # start frequency
-f2 = 3.0e9             # stop frequency
-freq_points = 10           # number of frequency points
+f1 = 2.3e9             # start frequency
+f2 = 2.6e9             # stop frequency
+freq_points = 5           # number of frequency points
 
 # --- Create simulation object -------------------------------------------
 model = em.Simulation('PatchAntenna', loglevel='DEBUG')
@@ -75,14 +71,16 @@ dielectric = em.geo.Box(wsub, hsub, th,
                         position=(-wsub/2, -hsub/2, -th))
 
 lambda1 = em.lib.C0 / ((f1))
-lambda2 = em.lib.C0 / ((f2))
+lambda23 = em.lib.C0 / ((f2))
 # Asymmetric margins (scale if you need to shrink/grow the domain)
-fwd     = 0.50*lambda2   #in antenna direction
-back    = 0.30*lambda2   #behind PCB
-sideL   = 0.30*lambda2   #each side
+fwd     = 0.50*lambda1   #in antenna direction
+back    = 0.30*lambda1   #behind PCB
+sideL   = 0.30*lambda1   #each side
 sideR   = sideL
-top     = 0.30*lambda2   #above MIFA tip
-bot     = 0.30*lambda2   #below PCB
+top     = 0.30*lambda1   #above MIFA tip
+bot     = 0.30*lambda1   #below PCB
+
+Rair    = 0.5*lambda1+hsub/2   # air sphere radius
 
 # Air box dimensions & placement (assume PCB spans x∈[0, pcbL], y∈[-pcbW/2, +pcbW/2], z≈0..mifaH)
 airX = hsub + fwd + back
@@ -91,16 +89,9 @@ airZ = top + bot+th
 x0, y0, z0 =  -sideL-wsub/2, -back-hsub/2, -bot-th/2
 
 
-# Air box above substrate (Z positive)
+# Air volume around substrate (Z positive)
 #air = em.geo.Sphere(Rair).background()
 air = em.geo.Box(airY,airX, airZ, position=(x0, y0, z0)).background()
-# air, *pml = em.geo.pmlbox(airY, airX, airZ, 
-#                           position=(x0,y0,z0), 
-#                           thickness=lambda2, 
-#                           N_mesh_layers=2,
-#                           left=True, right=True, front=True, back=True, top=True, bottom=True,
-#                           alignment=em.geo.Alignment.CENTER)
-# Background makes sure no materials of overlapping domains are overwritten
 
 fp_origin = np.array([-wsub/2 + ifa_fp, hsub/2 - ifa_h - ifa_te, 0.0])
 
@@ -111,12 +102,6 @@ ifa_radiating_element = em.geo.XYPlate(ifa_l,  ifa_w2,                 position=
 via_coord = em.CoordinateSystem(xax = (1,0,0),yax = (0,1,0),zax = (0,0,1),origin=fp_origin + np.array([-ifa_stub+ifa_w2/2, -via_size, 0]))
 via = em.geo.Cylinder(via_size/2, -th, cs=via_coord)
 
-ifa_dual_frequency = em.geo.XYPlate(ifa_l2, ifa_w2, position=fp_origin + np.array([-ifa_stub2, ifa_h2, 0]))
-ifa_short_circuit_stub2 = em.geo.XYPlate(ifa_w2, ifa_h2+1.5*via_size, position=fp_origin + np.array([-ifa_stub2, -1.5*via_size, 0]))
-
-via_coord2 = em.CoordinateSystem(xax = (1,0,0),yax = (0,1,0),zax = (0,0,1),origin=fp_origin + np.array([-ifa_stub2+ifa_w2/2, -via_size, 0]))
-via2 = em.geo.Cylinder(via_size/2, -th, cs=via_coord2)
-   
 ground = em.geo.XYPlate(wsub, fp_origin[1]+hsub/2, position=(-wsub/2, -hsub/2, -th)).set_material(em.lib.PEC)
 
 
@@ -130,11 +115,8 @@ port = em.geo.Plate(
 # Build final ifa shape
 ifa = em.geo.add(ifa_feed_stub, ifa_radiating_element)
 ifa = em.geo.add(ifa, ifa_short_circuit_stub)
-ifa = em.geo.add(ifa, ifa_dual_frequency)
-ifa = em.geo.add(ifa, ifa_short_circuit_stub2)
 ifa.set_material(em.lib.PEC)
 via.set_material(em.lib.PEC)
-via2.set_material(em.lib.PEC)
 # --- Assign materials and simulation settings ---------------------------
 # Dielectric material with some transparency for display
 dielectric.material = em.Material(3.38, color="#207020", opacity=0.9)
@@ -152,7 +134,6 @@ model.commit_geometry()
 # Finer boundary mesh on patch edges for accuracy
 model.mesher.set_boundary_size(ifa, 0.2 * mm)
 model.mesher.set_boundary_size(via, 0.2 * mm)
-model.mesher.set_boundary_size(via2, 0.2 * mm)
 # Refined mesh on port face for excitation accuracy
 model.mesher.set_face_size(port, 0.2 * mm)
 
@@ -160,7 +141,7 @@ model.mesher.set_face_size(port, 0.2 * mm)
 model.mesher.set_algorithm(em.Algorithm3D.HXT)
 model.generate_mesh()   
 # build the finite-element mesh
-model.view()
+#model.view()
 #model.view(selections=[port], plot_mesh=True)              # show the mesh around the port
 
 # --- Boundary conditions ------------------------------------------------
@@ -189,26 +170,25 @@ S11 = data.scalar.grid.model_S(1, 1, freq_dense)            # reflection coeffic
 plot_sp(freq_dense, S11)                       # plot return loss in dB
 smith(S11, f=freq_dense, labels='S11')         # Smith chart of S11
 
-# --- Far-field radiation pattern ----------------------------------------
-# Extract 2D cut at phi=0 plane and plot E-field magnitude
-ff1 = data.field.find(freq=2.45e9)\
-    .farfield_2d((0, 0, 1), (1, 0, 0), boundary_selection)
-ff2 = data.field.find(freq=2.45e9)\
-    .farfield_2d((0, 0, 1), (0, 1, 0), boundary_selection)
+# # --- Far-field radiation pattern ----------------------------------------
+# # Extract 2D cut at phi=0 plane and plot E-field magnitude
+# ff1 = data.field.find(freq=2.45e9)\
+#     .farfield_2d((0, 0, 1), (1, 0, 0), boundary_selection)
+# ff2 = data.field.find(freq=2.45e9)\
+#     .farfield_2d((0, 0, 1), (0, 1, 0), boundary_selection)
 
-plot_ff(ff1.ang*180/np.pi, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
-plot_ff_polar(ff1.ang, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, dBfloor=-20)          # polar plot of radiation
+# plot_ff(ff1.ang*180/np.pi, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
+# plot_ff_polar(ff1.ang, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, dBfloor=-20)          # polar plot of radiation
 
-# --- 3D radiation visualization -----------------------------------------
-# Add geometry to 3D display
-model.display.add_object(ifa)
-model.display.add_object(via)
-model.display.add_object(via2)
-model.display.add_object(dielectric)
-# Compute full 3D far-field and display surface colored by |E|
-ff3d = data.field.find(freq=2.45e9).farfield_3d(boundary_selection)
-surf = ff3d.surfplot('normE', rmax=60 * mm,
-                      offset=fp_origin,)
+# # --- 3D radiation visualization -----------------------------------------
+# # Add geometry to 3D display
+# model.display.add_object(ifa)
+# model.display.add_object(via)
+# model.display.add_object(dielectric)
+# # Compute full 3D far-field and display surface colored by |E|
+# ff3d = data.field.find(freq=2.45e9).farfield_3d(boundary_selection)
+# surf = ff3d.surfplot('normE', rmax=60 * mm,
+#                       offset=fp_origin,)
 
-model.display.add_surf(*surf)
-model.display.show()
+# model.display.add_surf(*surf)
+# model.display.show()
