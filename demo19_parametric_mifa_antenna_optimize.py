@@ -9,11 +9,11 @@ parameters = {
     'ifa_wf': 0.5*mm,
     'ifa_fp': 2*mm,
     'ifa_e': 0.5*mm,
-    'ifa_e2': 7*mm,
+    'ifa_e2': 0.5*mm,
     'ifa_te': 0.5*mm,
     'via_size': 0.5*mm,
     'wsub': 21*mm,
-    'hsub': 40*mm,
+    'hsub': 90*mm,
     'th': 1.5*mm,
     'mifa_meander': 2*mm,
     'mifa_meander_edge_distance': 3*mm,
@@ -21,14 +21,20 @@ parameters = {
     'f1': 2.30e9,
     'f0': 2.45e9,
     'f2': 2.60e9,
-    'freq_points': 3,
-    'boundry_size_divisor': 0.4,
-    'wavelength_fraction': 0.4,
+    'freq_points': 5,
+    'boundry_size_divisor': 0.33,
+    'wavelength_fraction': 0.2,
 }
 
 # IMPORTANT: set bounds in METERS. Multiply EACH entry by mm.
 optimize_parameters = { 
     'ifa_h':  (5.0*mm, 10.0*mm),
+    'ifa_l':  (15*mm, 30*mm),
+    'ifa_w1': (0.3*mm, 1.5*mm),
+    'ifa_w2': (0.3*mm, 1.5*mm),
+    'ifa_wf': (0.3*mm, 1.5*mm),
+    'ifa_fp': (1*mm, 5*mm),
+    'ifa_e2':  (0.5*mm, 15*mm),
 }
 
 best_params, result, summary = optimize_ifa(
