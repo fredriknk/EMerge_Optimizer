@@ -89,10 +89,13 @@ mifa = {
     'wavelength_fraction': 0.4,
 }
 
-parameters = ifa
+mifa_2_4_ghz = { 'boundry_size_divisor': 0.4, 'f0': 2.45e+09, 'f1': 2.3e+09, 'f2': 2.6e+09, 'freq_points': 3, 'hsub': 40.000*mm, 'ifa_e': 0.500*mm, 'ifa_e2': 7.000*mm, 'ifa_fp': 2.000*mm, 'ifa_h': 6.819*mm, 'ifa_l': 26.000*mm, 'ifa_te': 0.500*mm, 'ifa_w1': 0.619*mm, 'ifa_w2': 0.500*mm, 'ifa_wf': 0.500*mm, 'mifa_meander': 2.000*mm, 'mifa_meander_edge_distance': 3.000*mm, 'mifa_tipdistance': 3.000*mm, 'th': 1.500*mm, 'via_size': 0.500*mm, 'wavelength_fraction': 0.4, 'wsub': 21.000*mm }
 
-model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,view_model=False,run_simulation=True,compute_farfield=False)
+parameters = mifa_2_4_ghz
 
-print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")
-print(f"S11 return loss (dB) at {parameters['f0']/1e9} GHz: {get_loss(S11, parameters['f0'], freq_dense)} dB")
-plot_sp(freq_dense, S11)                       # plot return loss in dB
+model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,view_model=True,run_simulation=False,compute_farfield=False,loglevel="INFO")
+
+if S11 is not None:
+    print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")
+    print(f"S11 return loss (dB) at {parameters['f0']/1e9} GHz: {get_loss(S11, parameters['f0'], freq_dense)} dB")
+    plot_sp(freq_dense, S11)                       # plot return loss in dB

@@ -37,6 +37,41 @@ class OptLogger:
 
 
 # ---------- Utilities ----------
+
+mm = 1e-3  # context
+
+_MM_KEYS = {
+    'ifa_h','ifa_l','ifa_w1','ifa_w2','ifa_wf','ifa_fp','ifa_e','ifa_e2','ifa_te','via_size',
+    'wsub','hsub','th','mifa_meander','mifa_meander_edge_distance','mifa_tipdistance'
+}
+_FREQ_KEYS = {'f0','f1','f2'}
+
+def _fmt_params_singleline_mm(params: dict, precision: int = 3) -> str:
+    """
+    Return a single-line, copy-pastable dict like:
+    { 'ifa_h': 6.0*mm, 'ifa_l': 26*mm, 'f0': 2.45e9, ... }
+    - Geometry keys use '*mm'
+    - Frequencies are plain Hz numbers (no GHz)
+    - Others are printed with repr()
+    """
+    pairs = []
+    for k in sorted(params.keys()):
+        v = params[k]
+        # normalize numpy types
+        if hasattr(v, 'item'):
+            v = v.item()
+        if k in _MM_KEYS and isinstance(v, (int, float)):
+            val_mm = float(v) / mm
+            s = f"{val_mm:.{precision}f}*mm"
+        elif k in _FREQ_KEYS and isinstance(v, (int, float)):
+            # Hz, no units; keep in scientific/compact form
+            s = f"{float(v):.9g}"
+        else:
+            s = repr(v)
+        pairs.append(f"'{k}': {s}")
+    return "{ " + ", ".join(pairs) + " }"
+
+
 def _ensure_bounds_in_meters(optimize_parameters: Dict[str, Tuple[float, float]]) -> Dict[str, Tuple[float, float]]:
     cleaned = {}
     for k, v in optimize_parameters.items():
@@ -124,7 +159,8 @@ def _objective_factory(
 
             if improved:
                 state["best_obj"] = obj
-                state["best_rl"] = rl_dB
+                state["best_rl"]  = rl_dB
+                logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_mm(params, precision=3))
 
             return obj
 
