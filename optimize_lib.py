@@ -1,0 +1,226 @@
+import copy
+import time
+import numpy as np
+from typing import Dict, Tuple, List, Optional
+from scipy.optimize import differential_evolution
+
+import emerge as em
+from ifalib import build_mifa, get_s11_at_freq, get_loss
+from emerge.plot import plot_sp
+
+mm = 1e-3  # meters per millimeter
+
+
+# ---------- Minimal elapsed-time logger (solver-style) ----------
+class OptLogger:
+    def __init__(self, enabled: bool = True):
+        self.t0 = time.perf_counter()
+        self.enabled = enabled
+
+    def _stamp(self) -> str:
+        dt = time.perf_counter() - self.t0
+        # Format ~ "0:00:07.833792"
+        h = int(dt // 3600)
+        m = int((dt % 3600) // 60)
+        s = dt % 60
+        return f"{h}:{m:02d}:{s:06.3f}"
+
+    def _print(self, level: str, msg: str):
+        if not self.enabled:
+            return
+        # match the feel: "0:00:07.833792  INFO   : message"
+        print(f"{self._stamp():>12}  {level:<5}  : {msg}")
+
+    def info(self, msg: str): self._print("INFO", msg)
+    def warn(self, msg: str): self._print("WARN", msg)
+    def error(self, msg: str): self._print("ERROR", msg)
+
+
+# ---------- Utilities ----------
+def _ensure_bounds_in_meters(optimize_parameters: Dict[str, Tuple[float, float]]) -> Dict[str, Tuple[float, float]]:
+    cleaned = {}
+    for k, v in optimize_parameters.items():
+        if not (isinstance(v, (list, tuple)) and len(v) == 2):
+            raise ValueError(f"Bounds for '{k}' must be a 2-tuple/list in METERS (e.g., [0.5*mm, 1.0*mm]). Got: {v}")
+        lo, hi = float(v[0]), float(v[1])
+        if not (lo < hi):
+            raise ValueError(f"Lower bound must be < upper bound for '{k}'. Got {v}")
+        cleaned[k] = (lo, hi)
+    return cleaned
+
+def _pack_params(base: Dict[str, float], var_keys: List[str], x: np.ndarray) -> Dict[str, float]:
+    p = copy.deepcopy(base)
+    for k, val in zip(var_keys, x):
+        p[k] = float(val)
+    return p
+
+
+# ---------- Objective factory with logging ----------
+def _objective_factory(
+    base_parameters: Dict[str, float],
+    var_bounds_m: Dict[str, Tuple[float, float]],
+    *,
+    logger: OptLogger,
+    log_every_eval: bool = False,       # True = log every eval; False = only on improvement or failure
+    penalty_if_fail: float = 1e6,
+    bandwidth_target_db: Optional[float] = None,   # e.g., -10.0
+    bandwidth_span: Optional[Tuple[float, float]] = None,  # (f_lo, f_hi)
+    bandwidth_weight: float = 0.0
+):
+    var_keys = list(var_bounds_m.keys())
+    state = {
+        "evals": 0,
+        "best_obj": np.inf,
+        "best_rl": -np.inf,
+    }
+
+    def _objective(x: np.ndarray) -> float:
+        state["evals"] += 1
+        params = _pack_params(base_parameters, var_keys, x)
+
+        # Optional pre-sim log (verbose): parameter shortlist in mm
+        if log_every_eval:
+            short = ", ".join([f"{k}={params[k]/mm:.3f}mm" for k in var_keys])
+            logger.info(f"[eval {state['evals']:04d}] Simulating with {short}")
+
+        try:
+            model, S11, freq_dense, *_ = build_mifa(
+                params,
+                view_model=False,
+                run_simulation=True,
+                compute_farfield=False
+            )
+
+            rl_dB = get_loss(S11, params['f0'], freq_dense)
+
+            # Optional bandwidth reward
+            bandwidth_bonus = 0.0
+            if (bandwidth_target_db is not None) and (bandwidth_span is not None) and (bandwidth_weight > 0.0):
+                f_lo, f_hi = bandwidth_span
+                mask = (freq_dense >= f_lo) & (freq_dense <= f_hi)
+                if np.any(mask):
+                    rl_band = np.array([get_loss(S11, float(f), freq_dense) for f in freq_dense[mask]])
+                    frac_ok = float(np.mean(rl_band >= abs(bandwidth_target_db)))
+                    bandwidth_bonus = bandwidth_weight * frac_ok
+                else:
+                    frac_ok = 0.0
+            else:
+                frac_ok = None
+
+            obj = float(-(rl_dB) - bandwidth_bonus)  # minimize
+
+            improved = obj < state["best_obj"]
+            if improved or log_every_eval:
+                if frac_ok is None:
+                    logger.info(
+                        f"[eval {state['evals']:04d}] RL@f0={rl_dB:.2f} dB, objective={obj:.4f}"
+                        + ("  [NEW BEST]" if improved else "")
+                    )
+                else:
+                    logger.info(
+                        f"[eval {state['evals']:04d}] RL@f0={rl_dB:.2f} dB, BW_frac≥{abs(bandwidth_target_db):.1f}dB={frac_ok:.3f}, "
+                        f"objective={obj:.4f}" + ("  [NEW BEST]" if improved else "")
+                    )
+
+            if improved:
+                state["best_obj"] = obj
+                state["best_rl"] = rl_dB
+
+            return obj
+
+        except Exception as e:
+            if not log_every_eval:
+                # still be explicit if this was a fail
+                short = ", ".join([f"{k}={params[k]/mm:.3f}mm" for k in var_keys])
+                logger.warn(f"[eval {state['evals']:04d}] Simulation FAILED, {short} -> penalty {penalty_if_fail:g} ({e})")
+            else:
+                logger.warn(f"[eval {state['evals']:04d}] Simulation FAILED -> penalty {penalty_if_fail:g} ({e})")
+            return float(penalty_if_fail)
+
+    return _objective, var_keys
+
+
+# ---------- Top-level optimizer with iteration callback ----------
+def optimize_ifa(
+    start_parameters: Dict[str, float],
+    optimize_parameters: Dict[str, Tuple[float, float]],
+    *,
+    maxiter: int = 25,
+    popsize: int = 12,
+    seed: int = 42,
+    polish: bool = True,
+    log_every_eval: bool = False,      # set True if you want every evaluation logged
+    bandwidth_target_db: Optional[float] = None,
+    bandwidth_span: Optional[Tuple[float, float]] = None,
+    bandwidth_weight: float = 0.0,
+):
+    logger = OptLogger(enabled=True)
+
+    # Announce optimization plan
+    dims = len(optimize_parameters)
+    logger.info(f"Initializing optimizer over {dims} parameters.")
+    for k, (lo, hi) in _ensure_bounds_in_meters(optimize_parameters).items():
+        logger.info(f"Bounds {k}: [{lo/mm:.3f}, {hi/mm:.3f}] mm")
+
+    bounds_m = _ensure_bounds_in_meters(optimize_parameters)
+    objective, var_keys = _objective_factory(
+        start_parameters,
+        bounds_m,
+        logger=logger,
+        log_every_eval=log_every_eval,
+        bandwidth_target_db=bandwidth_target_db,
+        bandwidth_span=bandwidth_span,
+        bandwidth_weight=bandwidth_weight,
+    )
+    bounds_list = [bounds_m[k] for k in var_keys]
+
+    # SciPy iteration callback
+    iter_state = {"iter": 0}
+    def _cb(xk, convergence):
+        iter_state["iter"] += 1
+        # xk is current best vector
+        p = _pack_params(start_parameters, var_keys, xk)
+        msg = ", ".join([f"{k}={p[k]/mm:.3f}mm" for k in var_keys])
+        logger.info(f"[iter {iter_state['iter']:03d}] Best-so-far: {msg}  (convergence={convergence:.3g})")
+        return False  # continue
+
+    logger.info(f"Starting differential evolution: maxiter={maxiter}, popsize={popsize}, polish={polish}")
+    result = differential_evolution(
+        objective,
+        bounds=bounds_list,
+        maxiter=maxiter,
+        popsize=popsize,
+        seed=seed,
+        polish=polish,
+        updating='deferred',
+        workers=1,          # set to -1 if thread-safe
+        callback=_cb
+    )
+
+    best_params = _pack_params(start_parameters, var_keys, result.x)
+
+    # Final simulate + plot
+    logger.info("Optimization complete. Running final verification simulation for best parameters.")
+    model, S11, freq_dense, *_ = build_mifa(
+        best_params,
+        view_model=False,
+        run_simulation=True,
+        compute_farfield=False
+    )
+    rl_best = get_loss(S11, best_params['f0'], freq_dense)
+
+    logger.info(f"Best RL@f0 = {rl_best:.2f} dB")
+    for k in var_keys:
+        logger.info(f"  {k:>24s} = {best_params[k]/mm:.3f} mm")
+
+    plot_sp(freq_dense, S11)
+
+    summary = {
+        "best_return_loss_dB_at_f0": float(rl_best),
+        "best_params": {k: float(best_params[k]) for k in best_params},
+        "optimizer_message": result.message,
+        "optimizer_nfev": int(result.nfev),
+        "optimizer_success": bool(result.success),
+        "optimizer_fun": float(result.fun),
+    }
+    return best_params, result, summary

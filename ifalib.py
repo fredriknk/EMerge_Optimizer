@@ -101,9 +101,7 @@ def build_mifa_plates(
         while ldiff_ratio > 0:
             current_meander = min(1.0, ldiff_ratio)
             ldiff_ratio -= current_meander
-            print(f"Adding meander segment with length {current_meander * max_length_mifa*1000:.3e} mm")
             if current_meander < 0.05*mm:
-                print("Meander segment is too short, stopping.")
                 break
 
             # Top horizontal of meander (leftwards)
@@ -127,9 +125,6 @@ def build_mifa_plates(
             add_box_from_start_stop(seg4_start, seg4_stop, "meander_up")
 
             current_stop = seg4_stop  # tail for the next loop
-
-        # Finally connect back to the base at the short end
-        print(f"Adding final base connection from {current_stop} to {start_main}")
         add_box_from_start_stop(start_main, current_stop + np.array([ifa_w2, -ifa_w2, 0.0]), "base_link")
 
     # Add the straight base last (if not already linked fully)
@@ -141,10 +136,11 @@ def build_mifa(params,
                view_mesh=False,
                view_model=False,
                run_simulation=True,
-               compute_farfield=True):
+               compute_farfield=True,
+               loglevel="ERROR"):
 
     if model is None:
-        model = em.Simulation('PatchAntenna', loglevel='INFO')
+        model = em.Simulation('PatchAntenna', loglevel=loglevel)
         model.set_solver(em.EMSolver.CUDSS)
         model.check_version("1.1.0") # Checks version compatibility.
 
@@ -314,3 +310,22 @@ def build_mifa(params,
     ff3d = data.field.find(freq=2.45e9).farfield_3d(boundary_selection)
 
     return model, S11,freq_dense, ff1,ff2,ff3d
+
+def get_loss(S11,f0,freq_dense):
+    """Compute return loss (dB) from S11 complex values."""
+    # If you need to interpolate complex S11 first, do real & imag separately:
+    S11_re = np.interp(f0, freq_dense, S11.real)
+    S11_im = np.interp(f0, freq_dense, S11.imag)
+    S11_f0 = S11_re + 1j*S11_im
+
+    # Return loss (positive dB number)
+    RL_dB = -20*np.log10(np.abs(S11_f0))
+    return RL_dB
+
+def get_s11_at_freq(S11,f0,freq_dense):
+    """Get S11 complex value at center frequency."""
+    # If you need to interpolate complex S11 first, do real & imag separately:
+    S11_re = np.interp(f0, freq_dense, S11.real)
+    S11_im = np.interp(f0, freq_dense, S11.imag)
+    S11_f0 = S11_re + 1j*S11_im
+    return S11_f0
