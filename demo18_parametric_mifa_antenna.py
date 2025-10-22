@@ -33,6 +33,26 @@ This simulation is quite heavy and might take a while to fully compute.
 ############################################################################
 
 
+#############################################################
+#|------------- substrate_width -------------------|
+# _______________________________________________     _ substrate_thickness
+#| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
+#| V____          _______________     __________| | |  \_0 point
+#|               |    ___  ___   |___|  ______  | | |
+#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
+#|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
+#|               |   |   ||                   w2  | | |                  
+#|_______________|___|___||_______________________| |_|
+#| <---ifa_e---->| w1|   wf\                      | |
+#|               |__fp___|  \                     | |
+#|                       |    feed point          | |
+#|                       |                        | | substrate_length
+#|<- substrate_width/2 ->|                        | |
+#|                                                | |
+#|________________________________________________| |
+# \________________________________________________\|
+#############################################################
+Note: ifa_l is total length including meanders and tip
 """
 
 def build_ifa_plates(
@@ -102,7 +122,7 @@ def build_ifa_plates(
     # Don't append yet; we may add tip/meanders first depending on branch
     length_diff = ifa_l - usable_x
 
-    max_length_mifa = ifa_h - mifa_meander_edge_distance
+    max_length_mifa = ifa_h - mifa_meander_edge_distance -ifa_w2
     max_edgelength_tip = ifa_h - mifa_tipdistance
 
     # --- Tip element branch ---
@@ -134,7 +154,9 @@ def build_ifa_plates(
         while ldiff_ratio > 0:
             current_meander = min(1.0, ldiff_ratio)
             ldiff_ratio -= current_meander
-            if current_meander < 0.005:
+            print(f"Adding meander segment with length {current_meander * max_length_mifa*1000:.3e} mm")
+            if current_meander < 0.05*mm:
+                print("Meander segment is too short, stopping.")
                 break
 
             # Top horizontal of meander (leftwards)
@@ -144,7 +166,7 @@ def build_ifa_plates(
 
             # Down leg
             seg2_start = seg1_stop + np.array([0.0, ifa_w2, 0.0])
-            seg2_stop  = seg2_start + np.array([ifa_w2, -current_meander * max_length_mifa-0.5*ifa_w2, 0.0])
+            seg2_stop  = seg2_start + np.array([ifa_w2, -current_meander * max_length_mifa-ifa_w2, 0.0])
             add_box_from_start_stop(seg2_start, seg2_stop, "meander_down")
 
             # Bottom horizontal (rightwards)
@@ -154,12 +176,13 @@ def build_ifa_plates(
 
             # Up leg
             seg4_start = seg3_stop + np.array([+ifa_w2, -ifa_w2, 0.0])
-            seg4_stop  = seg4_start + np.array([-ifa_w2, +current_meander * max_length_mifa, 0.0])
+            seg4_stop  = seg4_start + np.array([-ifa_w2, current_meander * max_length_mifa+ifa_w2, 0.0])
             add_box_from_start_stop(seg4_start, seg4_stop, "meander_up")
 
             current_stop = seg4_stop  # tail for the next loop
 
         # Finally connect back to the base at the short end
+        print(f"Adding final base connection from {current_stop} to {start_main}")
         add_box_from_start_stop(start_main, current_stop + np.array([ifa_w2, -ifa_w2, 0.0]), "base_link")
 
     # Add the straight base last (if not already linked fully)
@@ -171,8 +194,8 @@ mm = 0.001              # meters per millimeter
 
 # --- Antenna geometry dimensions ----------------------------------------
 
-ifa_h = 10 * mm
-ifa_l = 70 * mm
+ifa_h = 20 * mm
+ifa_l = 140 * mm
 ifa_w1 = 1 * mm
 ifa_w2 = 1 * mm
 ifa_wf = 1 * mm
@@ -181,16 +204,18 @@ ifa_e = 0.5 * mm
 ifa_e2 = 0.5 * mm
 ifa_te = 0.5 * mm
 ifa_stub = ifa_fp-ifa_e
-
+mifa_meander=2*mm
+mifa_meander_edge_distance=2*mm
+mifa_tipdistance=2*mm
 via_size = 0.5 * mm
 
-wsub = 22 * mm         # substrate width
-hsub = 30 * mm         # substrate length
+wsub = 30 * mm         # substrate width
+hsub = 40 * mm         # substrate length
 th = 1.5 * mm         # substrate thickness
 
 # Refined frequency range for antenna resonance around 1.54–1.6 GHz
-f1 = 2.3e9             # start frequency
-f2 = 2.6e9             # stop frequency
+f1 = 0.5e9             # start frequency
+f2 = 1.5e9             # stop frequency
 freq_points = 5           # number of frequency points
 
 # --- Create simulation object -------------------------------------------
@@ -204,7 +229,7 @@ dielectric = em.geo.Box(wsub, hsub, th,
                         position=(-wsub/2, -hsub/2, -th))
 
 lambda1 = em.lib.C0 / ((f1))
-lambda23 = em.lib.C0 / ((f2))
+lambda2 = em.lib.C0 / ((f2))
 # Asymmetric margins (scale if you need to shrink/grow the domain)
 fwd     = 0.50*lambda1   #in antenna direction
 back    = 0.30*lambda1   #behind PCB
@@ -231,23 +256,23 @@ fp_origin = np.array([-wsub/2 + ifa_fp, hsub/2 - ifa_h - ifa_te, 0.0])
 plates = build_ifa_plates(
     substrate_width=wsub, substrate_thickness=th,
     ifa_l=ifa_l, ifa_h=ifa_h, ifa_w2=ifa_w2, ifa_fp=ifa_fp, ifa_e=ifa_e,ifa_e2=ifa_e2,
-    ifa_te=ifa_te, mifa_meander=2*mm, mifa_meander_edge_distance=0*mm, mifa_tipdistance=0*mm,
-    tl=fp_origin+np.array([0, 0, 0]), name_prefix="ifa"
+    ifa_te=ifa_te, mifa_meander=mifa_meander, mifa_meander_edge_distance=mifa_meander_edge_distance,
+    mifa_tipdistance=mifa_tipdistance, tl=fp_origin+np.array([0, 0, 0]), name_prefix="ifa"
 )
 
-ifa_feed_stub         = em.geo.XYPlate(ifa_wf, ifa_h + via_size,       position=fp_origin + np.array([0.0, -1.5*via_size, 0.0]))
-ifa_short_circuit_stub= em.geo.XYPlate(ifa_w2, ifa_h + 1.5*via_size,   position=fp_origin + np.array([-ifa_stub, -1.5*via_size, 0.0]))
+ifa_feed_stub         = em.geo.XYPlate(ifa_wf, ifa_h + 2*via_size,       position=fp_origin + np.array([0.0, -2*via_size, 0.0]))
+ifa_short_circuit_stub= em.geo.XYPlate(ifa_w2, ifa_h + 2*via_size,   position=fp_origin + np.array([-ifa_stub, -2*via_size, 0.0]))
 # ifa_radiating_element = em.geo.XYPlate(ifa_l,  ifa_w2,                 position=fp_origin + np.array([-ifa_stub,  ifa_h - ifa_w2, 0.0]))
 
-# via_coord = em.CoordinateSystem(xax = (1,0,0),yax = (0,1,0),zax = (0,0,1),origin=fp_origin + np.array([-ifa_stub+ifa_w2/2, -via_size, 0]))
-# via = em.geo.Cylinder(via_size/2, -th, cs=via_coord)
+via_coord = em.CoordinateSystem(xax = (1,0,0),yax = (0,1,0),zax = (0,0,1),origin=fp_origin + np.array([-ifa_stub+ifa_w2/2, -via_size, 0]))
+via = em.geo.Cylinder(via_size/2, -th, cs=via_coord)
 
 ground = em.geo.XYPlate(wsub, fp_origin[1]+hsub/2, position=(-wsub/2, -hsub/2, -th)).set_material(em.lib.PEC)
 
 
 # Plate defining lumped port geometry (origin + width/height vectors)
 port = em.geo.Plate(
-    fp_origin+np.array([0, -1.5*via_size, 0]),  # lower port corner
+    fp_origin+np.array([0, -2*via_size, 0]),  # lower port corner
     np.array([ifa_wf, 0, 0]),                # width vector along X
     np.array([0, 0, -th])                    # height vector along Z
 )
@@ -259,7 +284,7 @@ for p in plates[1:]:
 ifa = em.geo.add(ifa, ifa_feed_stub)
 ifa = em.geo.add(ifa, ifa_short_circuit_stub)
 ifa.set_material(em.lib.PEC)
-# via.set_material(em.lib.PEC)
+via.set_material(em.lib.PEC)
 # --- Assign materials and simulation settings ---------------------------
 # Dielectric material with some transparency for display
 dielectric.material = em.Material(3.38, color="#207020", opacity=0.9)
@@ -275,8 +300,9 @@ model.commit_geometry()
 
 # --- Mesh refinement settings --------------------------------------------
 # Finer boundary mesh on patch edges for accuracy
-model.mesher.set_boundary_size(ifa, 0.2 * mm)
-# model.mesher.set_boundary_size(via, 0.2 * mm)
+smallest_instance = min(ifa_w2, ifa_wf, ifa_w1)
+model.mesher.set_boundary_size(ifa, smallest_instance/3)
+model.mesher.set_boundary_size(via, via_size/3)
 # Refined mesh on port face for excitation accuracy
 model.mesher.set_face_size(port, 0.2 * mm)
 
@@ -285,53 +311,53 @@ model.mesher.set_algorithm(em.Algorithm3D.HXT)
 model.generate_mesh()   
 # build the finite-element mesh
 model.view()
-#model.view(selections=[port], plot_mesh=True)              # show the mesh around the port
+#model.view(selections=[port], plot_mesh=True,volume_mesh=False)              # show the mesh around the port
 
-# # --- Boundary conditions ------------------------------------------------
-# # Define lumped port with specified orientation and impedance
-# port_bc = model.mw.bc.LumpedPort(
-#     port, 1,
-#     width=ifa_wf, height=th,
-#     direction=em.ZAX, Z0=50
-# )
+# --- Boundary conditions ------------------------------------------------
+# Define lumped port with specified orientation and impedance
+port_bc = model.mw.bc.LumpedPort(
+    port, 1,
+    width=ifa_wf, height=th,
+    direction=em.ZAX, Z0=50
+)
 
-# # Predefining selection
-# # The outside of the air box for the absorbing boundary
-# boundary_selection = air.boundary()
-# # The patch and ground surface for PEC
-# pec_selection = em.select(ifa,ground)
+# Predefining selection
+# The outside of the air box for the absorbing boundary
+boundary_selection = air.boundary()
+# The patch and ground surface for PEC
+pec_selection = em.select(ifa,ground)
 
-# # Assigning the boundary conditions
-# abc = model.mw.bc.AbsorbingBoundary(boundary_selection)
-# # --- Run frequency-domain solver ----------------------------------------
-# data = model.mw.run_sweep()
+# Assigning the boundary conditions
+abc = model.mw.bc.AbsorbingBoundary(boundary_selection)
+# --- Run frequency-domain solver ----------------------------------------
+data = model.mw.run_sweep()
 
-# # --- Post-process S-parameters ------------------------------------------
-# freqs = data.scalar.grid.freq
-# freq_dense = np.linspace(f1, f2, 1001)
-# S11 = data.scalar.grid.model_S(1, 1, freq_dense)            # reflection coefficient
-# plot_sp(freq_dense, S11)                       # plot return loss in dB
-# smith(S11, f=freq_dense, labels='S11')         # Smith chart of S11
+# --- Post-process S-parameters ------------------------------------------
+freqs = data.scalar.grid.freq
+freq_dense = np.linspace(f1, f2, 1001)
+S11 = data.scalar.grid.model_S(1, 1, freq_dense)            # reflection coefficient
+plot_sp(freq_dense, S11)                       # plot return loss in dB
+smith(S11, f=freq_dense, labels='S11')         # Smith chart of S11
 
-# # # --- Far-field radiation pattern ----------------------------------------
-# # # Extract 2D cut at phi=0 plane and plot E-field magnitude
-# # ff1 = data.field.find(freq=2.45e9)\
-# #     .farfield_2d((0, 0, 1), (1, 0, 0), boundary_selection)
-# # ff2 = data.field.find(freq=2.45e9)\
-# #     .farfield_2d((0, 0, 1), (0, 1, 0), boundary_selection)
+# # --- Far-field radiation pattern ----------------------------------------
+# # Extract 2D cut at phi=0 plane and plot E-field magnitude
+# ff1 = data.field.find(freq=2.45e9)\
+#     .farfield_2d((0, 0, 1), (1, 0, 0), boundary_selection)
+# ff2 = data.field.find(freq=2.45e9)\
+#     .farfield_2d((0, 0, 1), (0, 1, 0), boundary_selection)
 
-# # plot_ff(ff1.ang*180/np.pi, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
-# # plot_ff_polar(ff1.ang, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, dBfloor=-20)          # polar plot of radiation
+# plot_ff(ff1.ang*180/np.pi, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
+# plot_ff_polar(ff1.ang, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, dBfloor=-20)          # polar plot of radiation
 
-# # # --- 3D radiation visualization -----------------------------------------
-# # # Add geometry to 3D display
-# # model.display.add_object(ifa)
-# # model.display.add_object(via)
-# # model.display.add_object(dielectric)
-# # # Compute full 3D far-field and display surface colored by |E|
-# # ff3d = data.field.find(freq=2.45e9).farfield_3d(boundary_selection)
-# # surf = ff3d.surfplot('normE', rmax=60 * mm,
-# #                       offset=fp_origin,)
+# # --- 3D radiation visualization -----------------------------------------
+# # Add geometry to 3D display
+# model.display.add_object(ifa)
+# model.display.add_object(via)
+# model.display.add_object(dielectric)
+# # Compute full 3D far-field and display surface colored by |E|
+# ff3d = data.field.find(freq=2.45e9).farfield_3d(boundary_selection)
+# surf = ff3d.surfplot('normE', rmax=60 * mm,
+#                       offset=fp_origin,)
 
-# # model.display.add_surf(*surf)
-# # model.display.show()
+# model.display.add_surf(*surf)
+# model.display.show()
