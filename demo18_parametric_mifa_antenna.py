@@ -1,6 +1,6 @@
 import emerge as em
 import numpy as np
-import ifalib
+from ifalib import build_mifa, get_s11_at_freq, get_loss
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
 
 """ PATCH ANTENNA DEMO
@@ -57,6 +57,7 @@ ifa = {
     'mifa_meander_edge_distance': 2*mm,
     'mifa_tipdistance': 2*mm,
     'f1': 2.3e9,
+    'f0': 2.45e9,
     'f2': 2.6e9,
     'freq_points': 3,
     'boundry_size_divisor': 0.33,
@@ -81,6 +82,7 @@ mifa = {
     'mifa_meander_edge_distance':3*mm,
     'mifa_tipdistance':3*mm,
     'f1': 2.3e9,
+    'f0': 2.45e9,
     'f2': 2.6e9,
     'freq_points': 3,
     'boundry_size_divisor': 0.4,
@@ -89,24 +91,8 @@ mifa = {
 
 parameters = ifa
 
-model, S11, freq_dense,ff1, ff2, ff3d = ifalib.build_mifa(parameters,view_model=False,run_simulation=True,compute_farfield=False)
+model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,view_model=False,run_simulation=True,compute_farfield=False)
 
-
-
+print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")
+print(f"S11 return loss (dB) at {parameters['f0']/1e9} GHz: {get_loss(S11, parameters['f0'], freq_dense)} dB")
 plot_sp(freq_dense, S11)                       # plot return loss in dB
-smith(S11, f=freq_dense, labels='S11')         # Smith chart of S11
-
-
-if ff1 is not None:
-    # reflection coefficient
-
-    plot_ff(ff1.ang*180/np.pi, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
-    plot_ff_polar(ff1.ang, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, dBfloor=-20)          # polar plot of radiation
-
-    # --- 3D radiation visualization -----------------------------------------
-    # Add geometry to 3D display
-
-    surf = ff3d.surfplot('normE', rmax=60 * mm,)
-
-    model.display.add_surf(*surf)
-    model.display.show()
