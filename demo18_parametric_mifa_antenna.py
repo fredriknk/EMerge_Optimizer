@@ -214,7 +214,7 @@ hsub = 40 * mm         # substrate length
 th = 1.5 * mm         # substrate thickness
 
 #meshing parameters
-common = 0.33
+common = 0.5
 boundry_size_divisor=common #
 wavelength_fraction=common  # mesh resolution as fraction of wavelength
 
