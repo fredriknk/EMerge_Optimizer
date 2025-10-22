@@ -195,8 +195,8 @@ mm = 0.001              # meters per millimeter
 # --- Antenna geometry dimensions ----------------------------------------
 
 ifa_h = 20 * mm
-ifa_l = 150 * mm
-ifa_w1 = 1 * mm
+ifa_l = 160 * mm
+ifa_w1 = 2 * mm
 ifa_w2 = 1 * mm
 ifa_wf = 1 * mm
 ifa_fp= 4 * mm
@@ -214,8 +214,9 @@ hsub = 40 * mm         # substrate length
 th = 1.5 * mm         # substrate thickness
 
 #meshing parameters
-boundry_size_divisor=0.2
-wavelength_fraction =0.2  # mesh resolution as fraction of wavelength
+common = 0.33
+boundry_size_divisor=common #
+wavelength_fraction=common  # mesh resolution as fraction of wavelength
 
 # Refined frequency range for antenna resonance around 1.54–1.6 GHz
 f1 = 0.5e9             # start frequency
@@ -307,10 +308,9 @@ model.commit_geometry()
 smallest_instance = min(ifa_w2, ifa_wf, ifa_w1)
 smallest_via = min(via_size, th)
 smallest_port = min(ifa_wf, th)
-model.mesher.set_boundary_size(ifa, smallest_instance/boundry_size_divisor)
-model.mesher.set_boundary_size(via, smallest_via/boundry_size_divisor)
-# Refined mesh on port face for excitation accuracy
-model.mesher.set_face_size(port, smallest_port/boundry_size_divisor)
+model.mesher.set_boundary_size(ifa, smallest_instance*boundry_size_divisor)
+model.mesher.set_boundary_size(via, smallest_via*boundry_size_divisor)
+model.mesher.set_face_size(port, smallest_port*boundry_size_divisor)
 
 # --- Generate mesh and preview ------------------------------------------
 model.mesher.set_algorithm(em.Algorithm3D.HXT)
