@@ -195,27 +195,31 @@ mm = 0.001              # meters per millimeter
 # --- Antenna geometry dimensions ----------------------------------------
 
 ifa_h = 20 * mm
-ifa_l = 140 * mm
+ifa_l = 150 * mm
 ifa_w1 = 1 * mm
 ifa_w2 = 1 * mm
 ifa_wf = 1 * mm
-ifa_fp= 2.5 * mm
+ifa_fp= 4 * mm
 ifa_e = 0.5 * mm
 ifa_e2 = 0.5 * mm
 ifa_te = 0.5 * mm
 ifa_stub = ifa_fp-ifa_e
 mifa_meander=2*mm
 mifa_meander_edge_distance=2*mm
-mifa_tipdistance=2*mm
+mifa_tipdistance=mifa_meander_edge_distance
 via_size = 0.5 * mm
 
 wsub = 30 * mm         # substrate width
 hsub = 40 * mm         # substrate length
 th = 1.5 * mm         # substrate thickness
 
+#meshing parameters
+boundry_size_divisor=0.2
+wavelength_fraction =0.2  # mesh resolution as fraction of wavelength
+
 # Refined frequency range for antenna resonance around 1.54–1.6 GHz
 f1 = 0.5e9             # start frequency
-f2 = 1.5e9             # stop frequency
+f2 = 1.0e9             # stop frequency
 freq_points = 5           # number of frequency points
 
 # --- Create simulation object -------------------------------------------
@@ -231,14 +235,14 @@ dielectric = em.geo.Box(wsub, hsub, th,
 lambda1 = em.lib.C0 / ((f1))
 lambda2 = em.lib.C0 / ((f2))
 # Asymmetric margins (scale if you need to shrink/grow the domain)
-fwd     = 0.50*lambda1   #in antenna direction
-back    = 0.30*lambda1   #behind PCB
-sideL   = 0.30*lambda1   #each side
+fwd     = 0.50*lambda2   #in antenna direction
+back    = 0.30*lambda2   #behind PCB
+sideL   = 0.30*lambda2   #each side
 sideR   = sideL
-top     = 0.30*lambda1   #above MIFA tip
-bot     = 0.30*lambda1   #below PCB
+top     = 0.30*lambda2   #above MIFA tip
+bot     = 0.30*lambda2   #below PCB
 
-Rair    = 0.5*lambda1+hsub/2   # air sphere radius
+Rair    = 0.5*lambda2+hsub/2   # air sphere radius
 
 # Air box dimensions & placement (assume PCB spans x∈[0, pcbL], y∈[-pcbW/2, +pcbW/2], z≈0..mifaH)
 airX = hsub + fwd + back
@@ -290,7 +294,7 @@ via.set_material(em.lib.PEC)
 dielectric.material = em.Material(3.38, color="#207020", opacity=0.9)
 
 # Mesh resolution: fraction of wavelength
-model.mw.set_resolution(0.2)
+model.mw.set_resolution(wavelength_fraction)
 
 # Frequency sweep across the resonance
 model.mw.set_frequency_range(f1, f2, freq_points)
@@ -301,10 +305,12 @@ model.commit_geometry()
 # --- Mesh refinement settings --------------------------------------------
 # Finer boundary mesh on patch edges for accuracy
 smallest_instance = min(ifa_w2, ifa_wf, ifa_w1)
-model.mesher.set_boundary_size(ifa, smallest_instance/3)
-model.mesher.set_boundary_size(via, via_size/3)
+smallest_via = min(via_size, th)
+smallest_port = min(ifa_wf, th)
+model.mesher.set_boundary_size(ifa, smallest_instance/boundry_size_divisor)
+model.mesher.set_boundary_size(via, smallest_via/boundry_size_divisor)
 # Refined mesh on port face for excitation accuracy
-model.mesher.set_face_size(port, 0.2 * mm)
+model.mesher.set_face_size(port, smallest_port/boundry_size_divisor)
 
 # --- Generate mesh and preview ------------------------------------------
 model.mesher.set_algorithm(em.Algorithm3D.HXT)
