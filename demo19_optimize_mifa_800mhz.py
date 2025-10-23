@@ -13,7 +13,7 @@ parameters = {
     'ifa_te': 0.5*mm,
     'via_size': 0.5*mm,
     'board_wsub': 30*mm,
-    'board_hsub': 90*mm,
+    'board_hsub': 110*mm,
     'board_th': 1.5*mm,
     'mifa_meander': 2*mm,
     'mifa_meander_edge_distance': 3*mm,
@@ -21,10 +21,10 @@ parameters = {
     'f1': 0.7e9,
     'f0': 0.8e9,
     'f2': 0.9e9,
-    'freq_points': 5,
+    'freq_points': 3,
     'mesh_boundry_size_divisor': 0.4,
-    'mesh_wavelength_fraction': 0.3,
-    'lambda_scale': 0.7,
+    'mesh_wavelength_fraction': 0.4,
+    'lambda_scale': 0.5,
 }
 
 # IMPORTANT: set bounds in METERS. Multiply EACH entry by mm.
@@ -37,12 +37,13 @@ optimize_parameters = {
     'ifa_fp': (3.5*mm, 10*mm),
     'ifa_e2':  (0.5*mm, 10*mm),
 }
+
 def main():
     best_params, result, summary = optimize_ifa(
         start_parameters=parameters,
         optimize_parameters=optimize_parameters,
-        maxiter=30,
-        popsize=14,
+        maxiter=5,
+        popsize=5,
         seed=1,
         polish=False,
         solver_name="CUDSS",
@@ -50,7 +51,7 @@ def main():
         bandwidth_target_db=-10.0,
         bandwidth_span=(parameters['f1'], parameters['f2']),
         bandwidth_weight=2.0,
-        include_start=True,
+        include_start=False,
         start_jitter=0.05,
         log_every_eval=False,
     )

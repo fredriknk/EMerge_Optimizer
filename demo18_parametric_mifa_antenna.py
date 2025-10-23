@@ -114,17 +114,15 @@ mifa_21x90_2_45ghz = {
     'via_size': 0.0005,  
     'lambda_scale': 1 }
 
-parameters = mifa_21x90_2_45ghz
+test = { 'ifa_h': 0.0299709994, 'ifa_l': 0.132941791, 'ifa_w1': 0.00124677375, 'ifa_w2': 0.000981297046, 'ifa_wf': 0.00134086962, 'ifa_fp': 0.00748710941, 'ifa_e': 0.0005, 'ifa_e2': 0.0015592993, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.09, 'board_th': 0.0015, 'mifa_meander': 0.002, 'mifa_meander_edge_distance': 0.003, 'mifa_tipdistance': 0.003, 'f1': 700000000, 'f0': 800000000, 'f2': 900000000, 'freq_points': 3, 'mesh_boundry_size_divisor': 0.4, 'mesh_wavelength_fraction': 0.3, 'lambda_scale': 0.7 }
+parameters = test
 
-parameters['mesh_boundry_size_divisor'] = 0.2
-parameters['mesh_wavelength_fraction'] = 0.2
-parameters['lambda_scale']=1
-parameters['f1'] = 2.1e9
-parameters['f0'] = 2.45e9
-parameters['f2'] = 2.8e9
-parameters['freq_points'] = 9
+# parameters['mesh_boundry_size_divisor'] = 0.33
+# parameters['mesh_wavelength_fraction'] = 0.2
+# parameters['lambda_scale']=1
+# parameters['freq_points'] = 9
 
-model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,view_model=True,run_simulation=True,compute_farfield=False,loglevel="INFO",solver=em.EMSolver.CUDSS)
+model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,view_model=True,run_simulation=True,compute_farfield=False,loglevel="INFO",solver=em.EMSolver.PARDISO)
 
 if S11 is not None:
     print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")

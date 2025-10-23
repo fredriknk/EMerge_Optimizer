@@ -170,7 +170,7 @@ def build_mifa(params,
     board_wsub = params['board_wsub']          # substrate width
     board_hsub = params['board_hsub']          # substrate length
     board_th = params['board_th']          # substrate thickness
-
+    
     # Refined frequency range for antenna resonance around 1.54–1.6 GHz
     f1 = params['f1']             # start frequency
     f2 = params['f2']             # stop frequency
@@ -178,6 +178,7 @@ def build_mifa(params,
     
     mesh_boundry_size_divisor = params['mesh_boundry_size_divisor']
     mesh_wavelength_fraction = params['mesh_wavelength_fraction']
+    
     
     # --- Define geometry primitives -----------------------------------------
     # Substrate block centered at origin in XY, thickness in Z (negative down)
