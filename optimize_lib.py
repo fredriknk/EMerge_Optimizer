@@ -184,7 +184,7 @@ def _safe_sim_rl_multi(
         if eta_done_evals is not None and eta_total_evals is not None and eta_avg_eval_s:
             remaining = max(eta_total_evals - eta_done_evals, 0)
             eta_sec = remaining * float(eta_avg_eval_s)
-            msg += f", ETA(total) ~ { _fmt_hms(eta_sec) }"
+            msg += f", ETA(total) ~ { _fmt_hms(eta_sec) }, Average Runtime: {eta_avg_eval_s:.1f}s"
         if logger: logger.info(msg)
         else: print(msg, flush=True)
 
