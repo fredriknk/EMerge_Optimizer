@@ -93,7 +93,7 @@ def main():
     run_stage(
         f"{SIMULATION_NAME}_quick",
         p, bounds,
-        maxiter=5, popsize=5, seed=1,
+        maxiter=4, popsize=12, seed=1,
         solver_name=SOLVER, timeout=120.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=1.5,
         include_start=False, start_jitter=0.05, log_every_eval=False
@@ -109,7 +109,7 @@ def main():
     run_stage(
         f"{SIMULATION_NAME}_refine1",
         p, bounds,
-        maxiter=10, popsize=8, seed=2,
+        maxiter=8, popsize=6, seed=2,
         solver_name=SOLVER, timeout=150.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=2.0,
         include_start=True, start_jitter=0.03, log_every_eval=False
@@ -125,7 +125,7 @@ def main():
     best_params, result, summary = run_stage(
         f"{SIMULATION_NAME}_refine2",
         p, bounds,
-        maxiter=12, popsize=10, seed=3,
+        maxiter=10, popsize=4, seed=3,
         solver_name=SOLVER, timeout=180.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=2.2,
         include_start=True, start_jitter=0.02, log_every_eval=False
