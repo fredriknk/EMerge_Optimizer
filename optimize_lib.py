@@ -42,7 +42,7 @@ mm = 1e-3  # context
 
 _MM_KEYS = {
     'ifa_h','ifa_l','ifa_w1','ifa_w2','ifa_wf','ifa_fp','ifa_e','ifa_e2','ifa_te','via_size',
-    'wsub','hsub','th','mifa_meander','mifa_meander_edge_distance','mifa_tipdistance'
+    'board_wsub','board_hsub','board_th','mifa_meander','mifa_meander_edge_distance','mifa_tipdistance'
 }
 _FREQ_KEYS = {'f0','f1','f2'}
 

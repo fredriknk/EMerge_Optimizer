@@ -12,9 +12,9 @@ parameters = {
     'ifa_e2': 0.5*mm,
     'ifa_te': 0.5*mm,
     'via_size': 0.5*mm,
-    'wsub': 30*mm,
-    'hsub': 90*mm,
-    'th': 1.5*mm,
+    'board_wsub': 30*mm,
+    'board_hsub': 90*mm,
+    'board_th': 1.5*mm,
     'mifa_meander': 2*mm,
     'mifa_meander_edge_distance': 3*mm,
     'mifa_tipdistance': 3*mm,
@@ -22,8 +22,8 @@ parameters = {
     'f0': 0.8e9,
     'f2': 0.9e9,
     'freq_points': 5,
-    'boundry_size_divisor': 0.33,
-    'wavelength_fraction': 0.2,
+    'mesh_boundry_size_divisor': 0.33,
+    'mesh_wavelength_fraction': 0.2,
 }
 
 # IMPORTANT: set bounds in METERS. Multiply EACH entry by mm.
@@ -57,7 +57,7 @@ print("Objective value (=-RL-BWbonus):", summary["optimizer_fun"])
 print("Best RL at f0 (dB):", summary["best_return_loss_dB_at_f0"])
 print("Best parameters (m):")
 for k, v in summary["best_params"].items():
-    if k.endswith(('_h','_w','_l','_e','_wf','_fp','_te','_size','wsub','hsub','th')):
+    if k.endswith(('_h','_w','_l','_e','_wf','_fp','_te','_size','board_wsub','board_hsub','board_th')):
         print(f"  {k:>24s}: {v/mm:.3f} mm")
     else:
         print(f"  {k:>24s}: {v}")

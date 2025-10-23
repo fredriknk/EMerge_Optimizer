@@ -51,9 +51,9 @@ ifa_e = ifa_fp-ifa_stub
 ifa_te = 0.5 * mm
 via_size = 0.5 * mm
 
-wsub = 22 * mm         # substrate width
-hsub = 40 * mm         # substrate length
-th = 1.5 * mm         # substrate thickness
+board_wsub = 22 * mm         # substrate width
+board_hsub = 40 * mm         # substrate length
+board_th = 1.5 * mm         # substrate thickness
 
 # Refined frequency range for antenna resonance around 1.54–1.6 GHz
 f1 = 2.3e9             # start frequency
@@ -67,8 +67,8 @@ model.check_version("1.1.0") # Checks version compatibility.
 
 # --- Define geometry primitives -----------------------------------------
 # Substrate block centered at origin in XY, thickness in Z (negative down)
-dielectric = em.geo.Box(wsub, hsub, th,
-                        position=(-wsub/2, -hsub/2, -th))
+dielectric = em.geo.Box(board_wsub, board_hsub, board_th,
+                        position=(-board_wsub/2, -board_hsub/2, -board_th))
 
 lambda1 = em.lib.C0 / ((f1))
 lambda23 = em.lib.C0 / ((f2))
@@ -80,36 +80,36 @@ sideR   = sideL
 top     = 0.30*lambda1   #above MIFA tip
 bot     = 0.30*lambda1   #below PCB
 
-Rair    = 0.5*lambda1+hsub/2   # air sphere radius
+Rair    = 0.5*lambda1+board_hsub/2   # air sphere radius
 
 # Air box dimensions & placement (assume PCB spans x∈[0, pcbL], y∈[-pcbW/2, +pcbW/2], z≈0..mifaH)
-airX = hsub + fwd + back
-airY = wsub + sideL + sideR
-airZ = top + bot+th 
-x0, y0, z0 =  -sideL-wsub/2, -back-hsub/2, -bot-th/2
+airX = board_hsub + fwd + back
+airY = board_wsub + sideL + sideR
+airZ = top + bot+board_th 
+x0, y0, z0 =  -sideL-board_wsub/2, -back-board_hsub/2, -bot-board_th/2
 
 
 # Air volume around substrate (Z positive)
 #air = em.geo.Sphere(Rair).background()
 air = em.geo.Box(airY,airX, airZ, position=(x0, y0, z0)).background()
 
-fp_origin = np.array([-wsub/2 + ifa_fp, hsub/2 - ifa_h - ifa_te, 0.0])
+fp_origin = np.array([-board_wsub/2 + ifa_fp, board_hsub/2 - ifa_h - ifa_te, 0.0])
 
 ifa_feed_stub         = em.geo.XYPlate(ifa_wf, ifa_h + via_size,       position=fp_origin + np.array([0.0, -1.5*via_size, 0.0]))
 ifa_short_circuit_stub= em.geo.XYPlate(ifa_w2, ifa_h + 1.5*via_size,   position=fp_origin + np.array([-ifa_stub, -1.5*via_size, 0.0]))
 ifa_radiating_element = em.geo.XYPlate(ifa_l,  ifa_w2,                 position=fp_origin + np.array([-ifa_stub,  ifa_h - ifa_w2, 0.0]))
 
 via_coord = em.CoordinateSystem(xax = (1,0,0),yax = (0,1,0),zax = (0,0,1),origin=fp_origin + np.array([-ifa_stub+ifa_w2/2, -via_size, 0]))
-via = em.geo.Cylinder(via_size/2, -th, cs=via_coord)
+via = em.geo.Cylinder(via_size/2, -board_th, cs=via_coord)
 
-ground = em.geo.XYPlate(wsub, fp_origin[1]+hsub/2, position=(-wsub/2, -hsub/2, -th)).set_material(em.lib.PEC)
+ground = em.geo.XYPlate(board_wsub, fp_origin[1]+board_hsub/2, position=(-board_wsub/2, -board_hsub/2, -board_th)).set_material(em.lib.PEC)
 
 
 # Plate defining lumped port geometry (origin + width/height vectors)
 port = em.geo.Plate(
     fp_origin+np.array([0, -1.5*via_size, 0]),  # lower port corner
     np.array([ifa_wf, 0, 0]),                # width vector along X
-    np.array([0, 0, -th])                    # height vector along Z
+    np.array([0, 0, -board_th])                    # height vector along Z
 )
 
 # Build final ifa shape
@@ -148,7 +148,7 @@ model.generate_mesh()
 # Define lumped port with specified orientation and impedance
 port_bc = model.mw.bc.LumpedPort(
     port, 1,
-    width=ifa_wf, height=th,
+    width=ifa_wf, height=board_th,
     direction=em.ZAX, Z0=50
 )
 
