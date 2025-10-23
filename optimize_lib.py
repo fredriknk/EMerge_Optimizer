@@ -1,16 +1,10 @@
-import copy
-import time
+import os, sys, time, copy
 import numpy as np
+import multiprocessing as mp
 from typing import Dict, Tuple, List, Optional
 from scipy.optimize import differential_evolution
 
-import emerge as em
-from ifalib import build_mifa, get_s11_at_freq, get_loss
-from emerge.plot import plot_sp
-
-import os, multiprocessing as mp
-import numpy as np
-
+mm = 1e-3
 mm = 1e-3  # meters per millimeter
 
 # ---------- Minimal elapsed-time logger (solver-style) ----------
@@ -41,86 +35,142 @@ class OptLogger:
 # ---------- Utilities ----------
 
 def _precheck_params(p: dict):
-    # Ensure positive dimensions and sane relationships (avoid negative plate sizes)
-    must_be_pos = ["ifa_h","ifa_l","ifa_w1","ifa_w2","ifa_wf","ifa_fp","ifa_e","ifa_e2","ifa_te",
-                   "via_size","board_wsub","board_hsub","board_th","mifa_meander",
-                   "mifa_meander_edge_distance","mifa_tipdistance"]
-    for k in must_be_pos:
-        if k in p and not (float(p[k]) > 0):
-            raise ValueError(f"Parameter {k} must be > 0 (got {p[k]!r})")
+    # positive dims
+    for k in ("ifa_h","ifa_l","ifa_w1","ifa_w2","ifa_wf","ifa_fp","ifa_e","ifa_e2","ifa_te",
+              "via_size","wsub","hsub","th","mifa_meander","mifa_meander_edge_distance","mifa_tipdistance"):
+        if k in p and not (float(p[k]) > 0.0):
+            raise ValueError(f"{k} must be > 0 (got {p[k]!r})")
 
-    # Ground plate depth = board_hsub - ifa_h - ifa_te must be > 0
-    if ("board_hsub" in p) and ("ifa_h" in p) and ("ifa_te" in p):
-        if float(p["board_hsub"]) - float(p["ifa_h"]) - float(p["ifa_te"]) <= 0:
-            raise ValueError("board_hsub must be > ifa_h + ifa_te (ground plate depth > 0)")
+    # simple clearance: hsub - ifa_h - ifa_te > 0
+    if all(k in p for k in ("hsub","ifa_h","ifa_te")):
+        if float(p["hsub"]) - float(p["ifa_h"]) - float(p["ifa_te"]) <= 0.0:
+            raise ValueError("hsub must be > ifa_h + ifa_te (ground clearance > 0)")
 
-    # Via must fit through board
-    if ("via_size" in p) and ("board_th" in p):
-        if float(p["via_size"]) <= 0 or float(p["board_th"]) <= 0:
-            raise ValueError("via_size and board_th must be > 0")
 
 # --- child worker that runs one simulation and returns (freq_dense, RL_dB array) ---
-def _eval_worker_multi(params: dict, queue: mp.Queue, solver_name: str = "PARDISO"):
+def _eval_worker_multi(params: dict, queue, solver_name: str = "PARDISO", project_root: Optional[str] = None):
+    """
+    Sends ('log', msg) pings while progressing, then ('ok', (freq_list, rl_list)) or ('pyerr', reason).
+    """
     try:
+        # tame native threads
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
         os.environ["MKL_NUM_THREADS"] = "1"
         os.environ["NUMEXPR_MAX_THREADS"] = "1"
-        # os.environ["CUDA_LAUNCH_BLOCKING"] = "1"  # debug only
 
+        queue.put(("log", "boot"))
+
+        # ensure the package path is visible after spawn
+        if project_root and project_root not in sys.path:
+            sys.path.insert(0, project_root)
+            queue.put(("log", f"sys.path+=[{project_root}]"))
+
+        queue.put(("log", "importing modules"))
+        import numpy as _np
         import emerge as em
         from ifalib import build_mifa, get_loss
 
-        # Map string -> enum safely inside the child
+        # map solver string -> enum
         try:
             solver = getattr(em.EMSolver, solver_name)
-        except AttributeError:
-            solver = em.EMSolver.PARDISO  # safe fallback
+        except Exception:
+            solver = em.EMSolver.PARDISO
+        queue.put(("log", f"solver={solver_name}"))
 
-        # (Optional) quick geometry guard to avoid impossible plates/boxes
+        # quick sanity
         _precheck_params(params)
+        queue.put(("log", "precheck_ok"))
 
+        # build & run (⚠️ only pass kwargs that build_mifa accepts)
+        queue.put(("log", "build_mifa_start"))
         model, S11, freq_dense, *_ = build_mifa(
             params,
             view_model=False,
             run_simulation=True,
             compute_farfield=False,
-            solver=solver
+            solver=solver,     # keep if build_mifa supports it
+            # loglevel="ERROR", # include if your function supports it
         )
+        queue.put(("log", "build_mifa_done"))
 
-        import numpy as _np
+        queue.put(("log", "postprocess_start"))
         rl_db = _np.array([float(get_loss(S11, float(f), freq_dense)) for f in freq_dense], dtype=float)
+        queue.put(("log", "postprocess_done"))
+
         queue.put(("ok", (list(map(float, freq_dense)), rl_db.tolist())))
     except Exception as e:
-        # Return the full message so parent can log it
-        queue.put(("pyerr", f"{type(e).__name__}: {e}"))
+        try:
+            queue.put(("pyerr", f"{type(e).__name__}: {e}"))
+        finally:
+            pass
+    finally:
+        try: queue.close()
+        except Exception: pass
 
-def _safe_sim_rl_multi(params: dict, timeout: float = 600.0, solver: em.EMSolver = em.EMSolver.PARDISO):
+def _safe_sim_rl_multi(params: dict, timeout: float = 600.0, solver_name: str = "PARDISO", logger: OptLogger = None):
     """
-    Isolated process evaluation.
     Returns (ok, (freq_list, rl_db_list)) or (False, reason_str).
     """
-    # Only pass primitives to child
-    solver_name = getattr(solver, "name", None) or str(solver).split(".")[-1]
-
     ctx = mp.get_context("spawn")
-    q = ctx.Queue()
-    p = ctx.Process(target=_eval_worker_multi, args=(params, q, solver_name))
-    p.start()
-    p.join(timeout)
+    q = ctx.SimpleQueue()
 
+    # project root (directory that contains ifalib.py / your project)
+    project_root = os.path.dirname(os.path.abspath(__file__))
+
+    p = ctx.Process(target=_eval_worker_multi, args=(params, q, solver_name, project_root))
+    p.start()
+
+    start = time.monotonic()
+    final_status, final_payload = None, None
+
+    while True:
+        remaining = timeout - (time.monotonic() - start)
+        if remaining <= 0:
+            final_status, final_payload = None, "queue_timeout_waiting_for_child"
+            break
+        try:
+            status, payload = q.get(timeout=max(0.2, min(2.0, remaining)))
+        except Exception:
+            if not p.is_alive():
+                final_status, final_payload = None, "child_exited_without_message"
+                break
+            continue
+
+        if status == "log":
+            if logger: logger.info(f"[child] {payload}")
+            else: print(f"[child] {payload}", flush=True)
+            continue
+
+        final_status, final_payload = status, payload
+        break
+
+    p.join(3.0)
     if p.is_alive():
         p.terminate()
-        p.join(5)
+        p.join(3.0)
 
-    if not q.empty():
-        status, payload = q.get_nowait()
-        if status == "ok":
-            return True, payload
-        else:
-            return False, payload
+    if final_status == "ok":
+        return True, final_payload
+    elif final_status == "pyerr":
+        return False, final_payload
     else:
-        return False, "native_crash_or_timeout"
+        return False, final_payload or "native_crash_or_timeout"
+
+    # wrap up the process
+    p.join(3.0)
+    if p.is_alive():
+        p.terminate()
+        p.join(3.0)
+
+    if final_status == "ok":
+        return True, final_payload
+    elif final_status == "pyerr":
+        return False, final_payload
+    else:
+        # no final message from child
+        return False, final_payload or "native_crash_or_timeout"
+
 
 
 _MM_KEYS = {
@@ -214,7 +264,7 @@ def _objective_factory(
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
     bandwidth_weight: float = 0.0,
-    solver: em.EMSolver = em.EMSolver.PARDISO,
+    solver_name: str = "PARDISO",
     timeout: float = 600.0
 ):
     var_keys = list(var_bounds_m.keys())
@@ -228,7 +278,7 @@ def _objective_factory(
             short = ", ".join([f"{k}={params[k]/mm:.3f}mm" for k in var_keys])
             logger.info(f"[eval {state['evals']:04d}] Simulating with {short}")
 
-        ok, payload = _safe_sim_rl_multi(params, timeout=timeout, solver=solver)
+        ok, payload = _safe_sim_rl_multi(params, timeout=timeout, solver_name=solver_name, logger=logger)
         if not ok:
             logger.warn(f"[eval {state['evals']:04d}] simulation failed ({payload}); applying penalty {penalty_if_fail:g}")
             return float(penalty_if_fail)
@@ -283,7 +333,6 @@ def _objective_factory(
 
 
 # ---------- Top-level optimizer with iteration callback ----------
-# ---------- Top-level optimizer with iteration callback ----------
 def optimize_ifa(
     start_parameters: Dict[str, float],
     optimize_parameters: Dict[str, Tuple[float, float]],
@@ -296,7 +345,7 @@ def optimize_ifa(
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
     bandwidth_weight: float = 0.0,
-    solver: em.EMSolver = em.EMSolver.CUDSS,
+    solver_name: str = "CUDSS",
     timeout: float = 600.0,
     include_start: bool = True,        # NEW: ensure start point is evaluated
     start_jitter: float = 0.05         # NEW: fraction of bound span for Gaussian jitter
@@ -310,16 +359,11 @@ def optimize_ifa(
         logger.info(f"Bounds {k}: [{lo/mm:.3f}, {hi/mm:.3f}] mm")
 
     bounds_m = _ensure_bounds_in_meters(optimize_parameters)
+    
     objective, var_keys = _objective_factory(
-        start_parameters,
-        bounds_m,
-        logger=logger,
-        log_every_eval=log_every_eval,
-        bandwidth_target_db=bandwidth_target_db,
-        bandwidth_span=bandwidth_span,
-        bandwidth_weight=bandwidth_weight,
-        solver=solver,
-        timeout=timeout,
+        start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
+        bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
+        bandwidth_weight=bandwidth_weight, solver_name=solver_name, timeout=timeout
     )
     bounds_list = [bounds_m[k] for k in var_keys]
 
@@ -379,11 +423,12 @@ def optimize_ifa(
 
     # Final simulate + plot
     logger.info("Optimization complete. Running final verification simulation for best parameters.")
+    from ifalib import build_mifa, get_loss
+    import emerge as em
+
+    solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
     model, S11, freq_dense, *_ = build_mifa(
-        best_params,
-        view_model=False,
-        run_simulation=True,
-        compute_farfield=False
+        best_params, view_model=False, run_simulation=True, compute_farfield=False, solver=solver_enum
     )
     rl_best = get_loss(S11, best_params['f0'], freq_dense)
 
@@ -394,7 +439,6 @@ def optimize_ifa(
     # Single-line, copy-pastable RAW dict for the winner
     logger.info("FINAL BEST PARAMS: " + _fmt_params_singleline_raw(best_params))
 
-    plot_sp(freq_dense, S11)
 
     summary = {
         "best_return_loss_dB_at_f0": float(rl_best),
