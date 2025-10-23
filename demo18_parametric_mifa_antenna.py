@@ -118,12 +118,12 @@ test = { 'ifa_h': 0.0296763865, 'ifa_l': 0.130751561, 'ifa_w1': 0.000756940097, 
 
 parameters = test
 
-parameters['mesh_boundry_size_divisor'] = 0.33
-parameters['mesh_wavelength_fraction'] = 0.2
-parameters['lambda_scale']=1
-parameters['freq_points'] = 5
+# parameters['mesh_boundry_size_divisor'] = 0.33
+# parameters['mesh_wavelength_fraction'] = 0.2
+# parameters['lambda_scale']=1
+# parameters['freq_points'] = 5
 
-model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,view_mesh=True, view_model=True,run_simulation=True,compute_farfield=False,loglevel="INFO",solver=em.EMSolver.PARDISO)
+model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,view_mesh=True, view_model=True,run_simulation=True,compute_farfield=False,loglevel="INFO",solver=em.EMSolver.CUDSS)
 
 if S11 is not None:
     print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")

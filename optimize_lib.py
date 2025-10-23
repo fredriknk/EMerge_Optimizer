@@ -329,7 +329,8 @@ def _objective_factory(
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
     bandwidth_weight: float = 0.0,
-    solver_name: str = "PARDISO", timeout: float = 600.0, maxiter_hint: int = None, popsize_hint: int = None):
+    solver_name: str = "PARDISO", timeout: float = 600.0, maxiter_hint: int = None, popsize_hint: int = None,
+    stage_name: str = "default"):
     var_keys = list(var_bounds_m.keys())
     state = {
         "evals": 0,
@@ -338,6 +339,7 @@ def _objective_factory(
         "t_last_start": None,
         "avg_eval_s": None,
         "total_evals_est": None,
+    
     }
 
     # estimate total evals once
@@ -417,7 +419,9 @@ def _objective_factory(
             state["best_obj"] = obj
             state["best_rl"]  = rl_f0
             logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_raw(params))
-            with open("best_trace.csv","a",encoding="utf-8") as f:
+            #make new folder if not exists
+            os.makedirs("best_params_logs", exist_ok=True)
+            with open(f"best_params_logs/{stage_name}.log","a",encoding="utf-8") as f:
                 f.write(f"{state['evals']},{rl_f0:.3f},{obj:.6f}," + _fmt_params_singleline_raw(params) + "\n")
 
         return obj
@@ -481,6 +485,7 @@ def run_stage(stage_name: str, params: dict, opt_bounds: Dict[str, Tuple[float, 
         include_start=include_start,
         start_jitter=start_jitter,
         log_every_eval=log_every_eval,
+        stage_name=stage_name
     )
     print(f"[{stage_name}] best RL@f0: {summary['best_return_loss_dB_at_f0']:.2f} dB")
     print(f"[{stage_name}] best params: {_fmt_params_singleline_raw(summary['best_params'], sort_keys=False)}")
@@ -507,7 +512,8 @@ def optimize_ifa(
     solver_name: str = "CUDSS",
     timeout: float = 600.0,
     include_start: bool = False,        # NEW: ensure start point is evaluated
-    start_jitter: float = 0.05         # NEW: fraction of bound span for Gaussian jitter
+    start_jitter: float = 0.05,         # NEW: fraction of bound span for Gaussian jitter
+    stage_name: str = "default"
 ):
     logger = OptLogger(enabled=True)
 
@@ -523,7 +529,7 @@ def optimize_ifa(
     start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
     bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
     bandwidth_weight=bandwidth_weight, solver_name=solver_name, timeout=timeout,
-    maxiter_hint=maxiter, popsize_hint=popsize
+    maxiter_hint=maxiter, popsize_hint=popsize, stage_name=stage_name
     )
     bounds_list = [bounds_m[k] for k in var_keys]
 

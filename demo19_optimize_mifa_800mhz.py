@@ -2,7 +2,38 @@ import json, os, math
 import multiprocessing as mp
 from typing import Dict, Tuple
 from optimize_lib import run_stage,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger
+""" MIFA OPTIMIZATION DEMO
 
+In this demo we build mifa antenna geometry and optimize it for operation
+around 800MHz with goals for low reflection and wide bandwidth.
+
+This simulation is very heavy and might take a while to fully compute.
+Its very reccomended to use a CUDA capable solver for this demo.
+
+The optimizer spawns single simulations to isolate from native chrashes
+the ouptut is logged to 
+
+#############################################################
+#|------------- substrate_width -------------------|
+# _______________________________________________     _ substrate_thickness
+#| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
+#| V____          _______________     __________  | |  \_0 point
+#|               |    ___  ___   |___|  ______  | | |
+#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
+#|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
+#|               |   |   ||                   w2  | | |                  
+#|_______________|___|___||_______________________| |_|
+#| <---ifa_e---->| w1|   wf\                      | |
+#|               |__fp___|  \                     | |
+#|                       |    feed point          | |
+#|                       |                        | | substrate_length
+#|<- substrate_width/2 ->|                        | |
+#|                                                | |
+#|________________________________________________| |
+# \________________________________________________\|
+#############################################################
+Note: ifa_l is total length including meanders and tip
+"""
 
 parameters = { 
     'ifa_h': 10.0*mm,
@@ -41,6 +72,12 @@ BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
     'ifa_e2': (0.5*mm,  10*mm),
 }
 
+
+SOLVER = "PARDISO"
+SOLVER = "CUDSS"
+
+SIMULATION_NAME = "mifa_800mhz_optimization"
+
 def main():
     # Keep an independent copy we can mutate stage-by-stage
     p = dict(parameters)
@@ -54,10 +91,10 @@ def main():
     p['mesh_boundry_size_divisor'] = 0.50
 
     run_stage(
-        "quick",
+        f"{SIMULATION_NAME}_quick",
         p, bounds,
         maxiter=5, popsize=5, seed=1,
-        solver_name="CUDSS", timeout=120.0,
+        solver_name=SOLVER, timeout=120.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=1.5,
         include_start=False, start_jitter=0.05, log_every_eval=False
     )
@@ -70,10 +107,10 @@ def main():
     p['mesh_boundry_size_divisor'] = 0.40
 
     run_stage(
-        "refine1",
+        f"{SIMULATION_NAME}_refine1",
         p, bounds,
         maxiter=10, popsize=8, seed=2,
-        solver_name="CUDSS", timeout=150.0,
+        solver_name=SOLVER, timeout=150.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=2.0,
         include_start=True, start_jitter=0.03, log_every_eval=False
     )
@@ -86,10 +123,10 @@ def main():
     p['mesh_boundry_size_divisor'] = 0.33
 
     best_params, result, summary = run_stage(
-        "refine2",
+        f"{SIMULATION_NAME}_refine2",
         p, bounds,
         maxiter=12, popsize=10, seed=3,
-        solver_name="CUDSS", timeout=180.0,
+        solver_name=SOLVER, timeout=180.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=2.2,
         include_start=True, start_jitter=0.02, log_every_eval=False
     )
