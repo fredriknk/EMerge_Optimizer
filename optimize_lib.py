@@ -441,7 +441,7 @@ def optimize_ifa(
     bandwidth_weight: float = 0.0,
     solver_name: str = "CUDSS",
     timeout: float = 600.0,
-    include_start: bool = True,        # NEW: ensure start point is evaluated
+    include_start: bool = False,        # NEW: ensure start point is evaluated
     start_jitter: float = 0.05         # NEW: fraction of bound span for Gaussian jitter
 ):
     logger = OptLogger(enabled=True)

@@ -1,5 +1,8 @@
+import json, os, math
 import multiprocessing as mp
-from optimize_lib import optimize_ifa, mm  # and anything else you use
+from typing import Dict, Tuple
+from optimize_lib import run_stage,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger
+
 
 parameters = { 
     'ifa_h': 10.0*mm,
@@ -27,40 +30,76 @@ parameters = {
     'lambda_scale': 0.5,
 }
 
-# IMPORTANT: set bounds in METERS. Multiply EACH entry by mm.
-optimize_parameters = { 
+# IMPORTANT: set bounds in METERS
+BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
     'ifa_h':  (10.0*mm, 30.0*mm),
-    'ifa_l':  (50*mm, 200*mm),
-    'ifa_w1': (0.6*mm, 1.5*mm),
-    'ifa_w2': (0.6*mm, 1.5*mm),
-    'ifa_wf': (0.6*mm, 1.5*mm),
-    'ifa_fp': (3.5*mm, 10*mm),
-    'ifa_e2':  (0.5*mm, 10*mm),
+    'ifa_l':  (50*mm,   200*mm),
+    'ifa_w1': (0.6*mm,  1.25*mm),
+    'ifa_w2': (0.6*mm,  1.25*mm),
+    'ifa_wf': (0.6*mm,  1.25*mm),
+    'ifa_fp': (3.5*mm,  10*mm),
+    'ifa_e2': (0.5*mm,  10*mm),
 }
 
 def main():
-    best_params, result, summary = optimize_ifa(
-        start_parameters=parameters,
-        optimize_parameters=optimize_parameters,
-        maxiter=5,
-        popsize=5,
-        seed=1,
-        polish=False,
-        solver_name="CUDSS",
-        timeout=200.0,  
-        bandwidth_target_db=-10.0,
-        bandwidth_span=(parameters['f1'], parameters['f2']),
-        bandwidth_weight=2.0,
-        include_start=False,
-        start_jitter=0.05,
-        log_every_eval=False,
+    # Keep an independent copy we can mutate stage-by-stage
+    p = dict(parameters)
+    bounds = dict(BASE_BOUNDS)
+
+    # ----------------- Stage 0: Quicksearch (very fast & coarse) -----------------
+    # Coarse mesh / fewer points / modest λ_scaling
+    p['freq_points'] = 3
+    p['lambda_scale'] = 0.5
+    p['mesh_wavelength_fraction'] = 0.50
+    p['mesh_boundry_size_divisor'] = 0.50
+
+    run_stage(
+        "quick",
+        p, bounds,
+        maxiter=5, popsize=5, seed=1,
+        solver_name="CUDSS", timeout=120.0,
+        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=1.5,
+        include_start=False, start_jitter=0.05, log_every_eval=False
     )
-    print("FINAL BEST PARAMS:", best_params)
 
+    # ----------------- Stage 1: Refine (narrow bounds, better mesh) --------------
+    bounds = shrink_bounds_around_best(p, bounds, shrink=0.35, min_span_mm=0.05)
+    p['freq_points'] = 3
+    p['lambda_scale'] = 0.7
+    p['mesh_wavelength_fraction'] = 0.30
+    p['mesh_boundry_size_divisor'] = 0.40
 
+    run_stage(
+        "refine1",
+        p, bounds,
+        maxiter=10, popsize=8, seed=2,
+        solver_name="CUDSS", timeout=150.0,
+        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=2.0,
+        include_start=True, start_jitter=0.03, log_every_eval=False
+    )
+
+    # ----------------- Stage 2: Refine deeper (tight bounds, denser sweep) -------
+    bounds = shrink_bounds_around_best(p, bounds, shrink=0.30, min_span_mm=0.03)
+    p['freq_points'] = 5
+    p['lambda_scale'] = 1.0
+    p['mesh_wavelength_fraction'] = 0.20
+    p['mesh_boundry_size_divisor'] = 0.33
+
+    best_params, result, summary = run_stage(
+        "refine2",
+        p, bounds,
+        maxiter=12, popsize=10, seed=3,
+        solver_name="CUDSS", timeout=180.0,
+        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=2.2,
+        include_start=True, start_jitter=0.02, log_every_eval=False
+    )
+
+    # Done: save final winner, print compact line again
+    write_json("best_params.json", summary["best_params"])
+    print("\n=== FINAL WINNER ===")
+    print(_fmt_params_singleline_raw(summary["best_params"], sort_keys=False))
 
 if __name__ == "__main__":
-    import multiprocessing as mp
     mp.freeze_support()
     try:
         mp.set_start_method("spawn", force=True)
