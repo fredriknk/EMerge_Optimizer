@@ -35,115 +35,141 @@ class OptLogger:
 # ---------- Utilities ----------
 
 def _precheck_params(p: dict):
-    # positive dims
-    for k in ("ifa_h","ifa_l","ifa_w1","ifa_w2","ifa_wf","ifa_fp","ifa_e","ifa_e2","ifa_te",
-              "via_size","wsub","hsub","th","mifa_meander","mifa_meander_edge_distance","mifa_tipdistance"):
+    pos_keys = {
+        "ifa_h","ifa_l","ifa_w1","ifa_w2","ifa_wf","ifa_fp","ifa_e","ifa_e2","ifa_te","via_size",
+        "wsub","hsub","th","board_wsub","board_hsub","board_th",
+        "mifa_meander","mifa_meander_edge_distance","mifa_tipdistance"
+    }
+    for k in pos_keys:
         if k in p and not (float(p[k]) > 0.0):
             raise ValueError(f"{k} must be > 0 (got {p[k]!r})")
 
-    # simple clearance: hsub - ifa_h - ifa_te > 0
-    if all(k in p for k in ("hsub","ifa_h","ifa_te")):
-        if float(p["hsub"]) - float(p["ifa_h"]) - float(p["ifa_te"]) <= 0.0:
-            raise ValueError("hsub must be > ifa_h + ifa_te (ground clearance > 0)")
+    hsub = p.get("hsub", p.get("board_hsub"))
+    if hsub is not None and "ifa_h" in p and "ifa_te" in p:
+        if float(hsub) - float(p["ifa_h"]) - float(p["ifa_te"]) <= 0.0:
+            raise ValueError("substrate height must be > ifa_h + ifa_te (ground clearance > 0)")
 
 
 # --- child worker that runs one simulation and returns (freq_dense, RL_dB array) ---
-def _eval_worker_multi(params: dict, queue, solver_name: str = "PARDISO", project_root: Optional[str] = None):
+def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project_root: Optional[str] = None):
     """
     Sends ('log', msg) pings while progressing, then ('ok', (freq_list, rl_list)) or ('pyerr', reason).
+    Uses a Pipe for robust IPC on Windows.
     """
     try:
-        # tame native threads
+        # hygiene first
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
         os.environ["MKL_NUM_THREADS"] = "1"
         os.environ["NUMEXPR_MAX_THREADS"] = "1"
 
-        queue.put(("log", "boot"))
-
-        # ensure the package path is visible after spawn
+        conn.send(("log", "boot"))
         if project_root and project_root not in sys.path:
             sys.path.insert(0, project_root)
-            queue.put(("log", f"sys.path+=[{project_root}]"))
+            conn.send(("log", f"sys.path+=[{project_root}]"))
 
-        queue.put(("log", "importing modules"))
+        conn.send(("log", "importing modules"))
         import numpy as _np
         import emerge as em
         from ifalib import build_mifa, get_loss
 
-        # map solver string -> enum
         try:
             solver = getattr(em.EMSolver, solver_name)
         except Exception:
             solver = em.EMSolver.PARDISO
-        queue.put(("log", f"solver={solver_name}"))
+        conn.send(("log", f"solver={solver_name}"))
 
         # quick sanity
         _precheck_params(params)
-        queue.put(("log", "precheck_ok"))
+        conn.send(("log", "precheck_ok"))
 
-        # build & run (⚠️ only pass kwargs that build_mifa accepts)
-        queue.put(("log", "build_mifa_start"))
+        # run sim (only pass kwargs that build_mifa accepts)
+        conn.send(("log", "build_mifa_start"))
         model, S11, freq_dense, *_ = build_mifa(
             params,
             view_model=False,
             run_simulation=True,
             compute_farfield=False,
-            solver=solver,     # keep if build_mifa supports it
-            # loglevel="ERROR", # include if your function supports it
+            solver=solver,   # keep if supported
+            # loglevel="ERROR",
         )
-        queue.put(("log", "build_mifa_done"))
+        conn.send(("log", "build_mifa_done"))
 
-        queue.put(("log", "postprocess_start"))
+        conn.send(("log", "postprocess_start"))
         rl_db = _np.array([float(get_loss(S11, float(f), freq_dense)) for f in freq_dense], dtype=float)
-        queue.put(("log", "postprocess_done"))
+        conn.send(("log", "postprocess_done"))
 
-        queue.put(("ok", (list(map(float, freq_dense)), rl_db.tolist())))
+        conn.send(("ok", (list(map(float, freq_dense)), rl_db.tolist())))
     except Exception as e:
         try:
-            queue.put(("pyerr", f"{type(e).__name__}: {e}"))
-        finally:
+            conn.send(("pyerr", f"{type(e).__name__}: {e}"))
+        except Exception:
             pass
     finally:
-        try: queue.close()
-        except Exception: pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 def _safe_sim_rl_multi(params: dict, timeout: float = 600.0, solver_name: str = "PARDISO", logger: OptLogger = None):
     """
+    Isolated process evaluation with streaming logs over a Pipe.
     Returns (ok, (freq_list, rl_db_list)) or (False, reason_str).
     """
     ctx = mp.get_context("spawn")
-    q = ctx.SimpleQueue()
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
 
-    # project root (directory that contains ifalib.py / your project)
     project_root = os.path.dirname(os.path.abspath(__file__))
-
-    p = ctx.Process(target=_eval_worker_multi, args=(params, q, solver_name, project_root))
+    p = ctx.Process(target=_eval_worker_multi, args=(params, child_conn, solver_name, project_root))
     p.start()
+    child_conn.close()  # close child's end in parent
 
     start = time.monotonic()
     final_status, final_payload = None, None
 
+    # stream messages until ok/pyerr or timeout
     while True:
         remaining = timeout - (time.monotonic() - start)
         if remaining <= 0:
-            final_status, final_payload = None, "queue_timeout_waiting_for_child"
+            final_status, final_payload = None, "pipe_timeout_waiting_for_child"
             break
-        try:
-            status, payload = q.get(timeout=max(0.2, min(2.0, remaining)))
-        except Exception:
+
+        if parent_conn.poll(max(0.2, min(2.0, remaining))):
+            try:
+                status, payload = parent_conn.recv()
+            except EOFError:
+                # child closed pipe unexpectedly
+                final_status, final_payload = None, "child_closed_pipe"
+                break
+
+            if status == "log":
+                if logger: logger.info(f"[child] {payload}")
+                else: print(f"[child] {payload}", flush=True)
+                continue
+
+            final_status, final_payload = status, payload
+            break
+        else:
             if not p.is_alive():
                 final_status, final_payload = None, "child_exited_without_message"
                 break
-            continue
 
-        if status == "log":
-            if logger: logger.info(f"[child] {payload}")
-            else: print(f"[child] {payload}", flush=True)
-            continue
+    try:
+        parent_conn.close()
+    except Exception:
+        pass
 
-        final_status, final_payload = status, payload
-        break
+    p.join(3.0)
+    if p.is_alive():
+        p.terminate()
+        p.join(3.0)
+
+    if final_status == "ok":
+        return True, final_payload
+    elif final_status == "pyerr":
+        return False, final_payload
+    else:
+        return False, final_payload or "native_crash_or_timeout"
 
     p.join(3.0)
     if p.is_alive():
@@ -326,6 +352,8 @@ def _objective_factory(
             state["best_obj"] = obj
             state["best_rl"]  = rl_f0
             logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_raw(params))
+            with open("best_trace.csv","a",encoding="utf-8") as f:
+                f.write(f"{state['evals']},{rl_f0:.3f},{obj:.6f}," + _fmt_params_singleline_raw(params) + "\n")
 
         return obj
 

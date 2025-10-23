@@ -27,31 +27,6 @@ parameters = {
     'lambda_scale': 0.7,
 }
 
-parameters = {
-    'board_wsub': 0.021, 
-    'board_th': 0.0015,
-    'f0': 2.45e+09, 
-    'f1': 2.3e+09, 
-    'f2': 2.6e+09, 
-    'freq_points': 3, 
-    'board_hsub': 0.09, 
-    'ifa_e': 0.0005, 
-    'ifa_e2': 0.000575394784, 
-    'ifa_fp': 0.00378423695, 
-    'ifa_h': 0.00790411482, 
-    'ifa_l': 0.0196761041, 
-    'ifa_te': 0.0005, 
-    'ifa_w1': 0.000550173526, 
-    'ifa_w2': 0.00129312109, 
-    'ifa_wf': 0.000433478781, 
-    'mesh_boundry_size_divisor': 0.33,
-    'mesh_wavelength_fraction': 0.2, 
-    'mifa_meander': 0.002, 
-    'mifa_meander_edge_distance': 0.003, 
-    'mifa_tipdistance': 0.003, 
-    'via_size': 0.0005,  
-    'lambda_scale': 1 }
-
 # IMPORTANT: set bounds in METERS. Multiply EACH entry by mm.
 optimize_parameters = { 
     'ifa_h':  (10.0*mm, 30.0*mm),
