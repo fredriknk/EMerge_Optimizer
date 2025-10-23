@@ -1,4 +1,5 @@
 from optimize_lib import optimize_ifa
+import emerge as em
 
 mm = 1e-3
 parameters = { 
@@ -22,8 +23,9 @@ parameters = {
     'f0': 0.8e9,
     'f2': 0.9e9,
     'freq_points': 5,
-    'mesh_boundry_size_divisor': 0.33,
-    'mesh_wavelength_fraction': 0.2,
+    'mesh_boundry_size_divisor': 0.4,
+    'mesh_wavelength_fraction': 0.3,
+    'lambda_scale': 0.7,
 }
 
 # IMPORTANT: set bounds in METERS. Multiply EACH entry by mm.
@@ -44,7 +46,8 @@ best_params, result, summary = optimize_ifa(
     popsize=14,           # population size per dim
     seed=1,
     polish=True,
-
+    solver=em.EMSolver.PARDISO,
+    timeout=200.0,
     # Optional bandwidth shaping (uncomment if you want it)
     bandwidth_target_db=-10.0,
     bandwidth_span=(parameters['f1'], parameters['f2']),
