@@ -3,7 +3,7 @@ import numpy as np
 import multiprocessing as mp
 from typing import Dict, Tuple, List, Optional
 from scipy.optimize import differential_evolution
-
+import json, os, math
 mm = 1e-3
 mm = 1e-3  # meters per millimeter
 
@@ -359,6 +359,72 @@ def _objective_factory(
 
     return _objective, var_keys
 
+# ---------- Bounds shrinking utility ----------
+def clamp(x, lo, hi): return max(lo, min(hi, x))
+
+def shrink_bounds_around_best(best: dict, prev_bounds: Dict[str, Tuple[float, float]],
+                              *, shrink: float, min_span_mm: float = 0.1) -> Dict[str, Tuple[float, float]]:
+    """
+    Create new bounds centered at best[k] with span = shrink * previous span.
+    min_span_mm is the minimum *total* span (meters) to keep search alive.
+    """
+    out = {}
+    min_span = min_span_mm * mm
+    for k, (lo0, hi0) in prev_bounds.items():
+        mid = float(best[k])
+        span0 = hi0 - lo0
+        new_span = max(shrink * span0, min_span)
+        lo = clamp(mid - 0.5*new_span, lo0, hi0)
+        hi = clamp(mid + 0.5*new_span, lo0, hi0)
+        # If clamped collapsed, re-center within original window
+        if hi - lo < min_span:
+            pad = 0.5*min_span
+            lo = clamp(mid - pad, lo0, hi0)
+            hi = clamp(mid + pad, lo0, hi0)
+        out[k] = (lo, hi)
+    return out
+
+def write_json(path, obj):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2)
+
+def append_trace(csv_path: str, stage: str, evals: int, best_rl: float, obj: float, params: dict):
+    hdr_needed = not os.path.exists(csv_path)
+    with open(csv_path, "a", encoding="utf-8") as f:
+        if hdr_needed:
+            f.write("stage,evals,best_rl_dB,objective,params\n")
+        f.write(f"{stage},{evals},{best_rl:.3f},{obj:.6f},\"{_fmt_params_singleline_raw(params, sort_keys=False)}\"\n")
+
+def run_stage(stage_name: str, params: dict, opt_bounds: Dict[str, Tuple[float, float]],
+              *, maxiter: int, popsize: int, seed: int,
+              solver_name: str, timeout: float,
+              bandwidth_target_db: float, bandwidth_span, bandwidth_weight: float,
+              include_start: bool, start_jitter: float, log_every_eval: bool):
+    print(f"\n=== Stage: {stage_name} ===")
+    best_params, result, summary = optimize_ifa(
+        start_parameters=params,
+        optimize_parameters=opt_bounds,
+        maxiter=maxiter,
+        popsize=popsize,
+        seed=seed,
+        polish=False,                      # keep fast in staged passes; final verify happens inside
+        solver_name=solver_name,
+        timeout=timeout,
+        bandwidth_target_db=bandwidth_target_db,
+        bandwidth_span=bandwidth_span,
+        bandwidth_weight=bandwidth_weight,
+        include_start=include_start,
+        start_jitter=start_jitter,
+        log_every_eval=log_every_eval,
+    )
+    print(f"[{stage_name}] best RL@f0: {summary['best_return_loss_dB_at_f0']:.2f} dB")
+    print(f"[{stage_name}] best params: {_fmt_params_singleline_raw(summary['best_params'], sort_keys=False)}")
+    append_trace("best_trace.csv", stage_name, summary["optimizer_nfev"],
+                 summary["best_return_loss_dB_at_f0"], summary["optimizer_fun"], summary["best_params"])
+    write_json(f"best_params_{stage_name}.json", summary["best_params"])
+    # Update our live params for the next stage
+    params.update(summary["best_params"])
+    return best_params, result, summary
 
 # ---------- Top-level optimizer with iteration callback ----------
 def optimize_ifa(
