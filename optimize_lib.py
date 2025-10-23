@@ -53,22 +53,22 @@ def _precheck_params(p: dict):
 # --- child worker that runs one simulation and returns (freq_dense, RL_dB array) ---
 def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project_root: Optional[str] = None):
     """
-    Sends ('log', msg) pings while progressing, then ('ok', (freq_list, rl_list)) or ('pyerr', reason).
-    Uses a Pipe for robust IPC on Windows.
+    Quiet worker with heartbeat. Emits:
+      - ('hb', {'label': <stage>, 'elapsed': <seconds>, 'n': <count>}) every few seconds
+      - ('log', 'build_mifa_done') and ('log', 'postprocess_done') at milestones
+      - ('ok', (freq_list, rl_list)) on success, or ('pyerr', '...') on error
     """
+    import time, threading, os, sys
     try:
-        # hygiene first
+        # hygiene
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["OPENBLAS_NUM_THREADS"] = "1"
         os.environ["MKL_NUM_THREADS"] = "1"
         os.environ["NUMEXPR_MAX_THREADS"] = "1"
 
-        conn.send(("log", "boot"))
         if project_root and project_root not in sys.path:
             sys.path.insert(0, project_root)
-            conn.send(("log", f"sys.path+=[{project_root}]"))
 
-        conn.send(("log", "importing modules"))
         import numpy as _np
         import emerge as em
         from ifalib import build_mifa, get_loss
@@ -76,28 +76,54 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
         try:
             solver = getattr(em.EMSolver, solver_name)
         except Exception:
-            solver = em.EMSolver.PARDISO
-        conn.send(("log", f"solver={solver_name}"))
+            solver = em.EMSolver.PARDISO  # safe fallback
 
         # quick sanity
+        def _precheck_params(p: dict):
+            for k in ("ifa_h","ifa_l","ifa_w1","ifa_w2","ifa_wf","ifa_fp","ifa_e","ifa_e2","ifa_te",
+                      "via_size","wsub","hsub","th","board_wsub","board_hsub","board_th",
+                      "mifa_meander","mifa_meander_edge_distance","mifa_tipdistance"):
+                if k in p and not (float(p[k]) > 0.0):
+                    raise ValueError(f"{k} must be > 0 (got {p[k]!r})")
+            hsub = p.get("hsub", p.get("board_hsub"))
+            if hsub is not None and "ifa_h" in p and "ifa_te" in p:
+                if float(hsub) - float(p["ifa_h"]) - float(p["ifa_te"]) <= 0.0:
+                    raise ValueError("substrate height must be > ifa_h + ifa_te")
         _precheck_params(params)
-        conn.send(("log", "precheck_ok"))
 
-        # run sim (only pass kwargs that build_mifa accepts)
-        conn.send(("log", "build_mifa_start"))
+        # heartbeat helper
+        def heartbeat(label: str, stop_evt: threading.Event, period: float = 5.0):
+            t0 = time.monotonic(); n = 0
+            while not stop_evt.wait(period):
+                n += 1
+                try:
+                    conn.send(("hb", {"label": label, "elapsed": time.monotonic()-t0, "n": n}))
+                except Exception:
+                    break
+
+        # --- build & run with heartbeat ---
+        stop_hb = threading.Event()
+        th = threading.Thread(target=heartbeat, args=("build", stop_hb, 5.0), daemon=True)
+        th.start()
+
         model, S11, freq_dense, *_ = build_mifa(
             params,
             view_model=False,
             run_simulation=True,
             compute_farfield=False,
-            solver=solver,   # keep if supported
-            # loglevel="ERROR",
+            solver=solver,
         )
-        conn.send(("log", "build_mifa_done"))
 
-        conn.send(("log", "postprocess_start"))
+        stop_hb.set(); th.join(timeout=1.0)
+        try: 
+            conn.send(("log", "build_mifa_done")) 
+        except: pass
+
+        # postprocess (short): optional micro-heartbeat if you want
         rl_db = _np.array([float(get_loss(S11, float(f), freq_dense)) for f in freq_dense], dtype=float)
-        conn.send(("log", "postprocess_done"))
+        try: 
+            conn.send(("log", "postprocess_done"))
+        except: pass
 
         conn.send(("ok", (list(map(float, freq_dense)), rl_db.tolist())))
     except Exception as e:
@@ -106,28 +132,62 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
         except Exception:
             pass
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        try: conn.close()
+        except Exception: pass
 
-def _safe_sim_rl_multi(params: dict, timeout: float = 600.0, solver_name: str = "PARDISO", logger: OptLogger = None):
+
+def _fmt_hms(seconds: float) -> str:
+    s = int(seconds)
+    h, r = divmod(s, 3600); m, s = divmod(r, 60)
+    return f"{h:02d}:{m:02d}:{s:02d}"
+
+def _safe_sim_rl_multi(
+    params: dict,
+    timeout: float = 600.0,
+    solver_name: str = "PARDISO",
+    logger: OptLogger = None,
+    *,
+    # Heartbeat options
+    hb_print: bool = True,
+    hb_min_interval: float = 10.0,  # seconds between prints
+    # ETA hint from caller (coarse)
+    eta_done_evals: Optional[int] = None,
+    eta_total_evals: Optional[int] = None,
+    eta_avg_eval_s: Optional[float] = None,
+):
     """
-    Isolated process evaluation with streaming logs over a Pipe.
-    Returns (ok, (freq_list, rl_db_list)) or (False, reason_str).
+    Isolated process evaluation over a Pipe.
+    Streams ('hb', {...}) and only prints every hb_min_interval seconds.
+    If eta_* hints are provided, prints an ETA for the whole DE run.
     """
     ctx = mp.get_context("spawn")
     parent_conn, child_conn = ctx.Pipe(duplex=False)
-
     project_root = os.path.dirname(os.path.abspath(__file__))
     p = ctx.Process(target=_eval_worker_multi, args=(params, child_conn, solver_name, project_root))
     p.start()
-    child_conn.close()  # close child's end in parent
+    child_conn.close()
 
     start = time.monotonic()
-    final_status, final_payload = None, None
+    final_status = final_payload = None
+    last_hb_print = 0.0
 
-    # stream messages until ok/pyerr or timeout
+    def _maybe_print_hb(label: str, elapsed: float):
+        nonlocal last_hb_print
+        if not hb_print:
+            return
+        now = time.monotonic()
+        if now - last_hb_print < hb_min_interval:
+            return
+        last_hb_print = now
+        msg = f"[hb] {label} elapsed={_fmt_hms(elapsed)}"
+        # ETA if we have hints
+        if eta_done_evals is not None and eta_total_evals is not None and eta_avg_eval_s:
+            remaining = max(eta_total_evals - eta_done_evals, 0)
+            eta_sec = remaining * float(eta_avg_eval_s)
+            msg += f", ETA(total) ~ { _fmt_hms(eta_sec) }"
+        if logger: logger.info(msg)
+        else: print(msg, flush=True)
+
     while True:
         remaining = timeout - (time.monotonic() - start)
         if remaining <= 0:
@@ -138,13 +198,17 @@ def _safe_sim_rl_multi(params: dict, timeout: float = 600.0, solver_name: str = 
             try:
                 status, payload = parent_conn.recv()
             except EOFError:
-                # child closed pipe unexpectedly
                 final_status, final_payload = None, "child_closed_pipe"
                 break
 
+            if status == "hb":
+                label = payload.get("label", "?"); elapsed = float(payload.get("elapsed", 0.0))
+                _maybe_print_hb(label, elapsed)
+                continue
+
             if status == "log":
+                # quiet milestone logs: one-liners
                 if logger: logger.info(f"[child] {payload}")
-                else: print(f"[child] {payload}", flush=True)
                 continue
 
             final_status, final_payload = status, payload
@@ -171,31 +235,6 @@ def _safe_sim_rl_multi(params: dict, timeout: float = 600.0, solver_name: str = 
     else:
         return False, final_payload or "native_crash_or_timeout"
 
-    p.join(3.0)
-    if p.is_alive():
-        p.terminate()
-        p.join(3.0)
-
-    if final_status == "ok":
-        return True, final_payload
-    elif final_status == "pyerr":
-        return False, final_payload
-    else:
-        return False, final_payload or "native_crash_or_timeout"
-
-    # wrap up the process
-    p.join(3.0)
-    if p.is_alive():
-        p.terminate()
-        p.join(3.0)
-
-    if final_status == "ok":
-        return True, final_payload
-    elif final_status == "pyerr":
-        return False, final_payload
-    else:
-        # no final message from child
-        return False, final_payload or "native_crash_or_timeout"
 
 
 
@@ -290,21 +329,47 @@ def _objective_factory(
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
     bandwidth_weight: float = 0.0,
-    solver_name: str = "PARDISO",
-    timeout: float = 600.0
-):
+    solver_name: str = "PARDISO", timeout: float = 600.0, maxiter_hint: int = None, popsize_hint: int = None):
     var_keys = list(var_bounds_m.keys())
-    state = {"evals": 0, "best_obj": np.inf, "best_rl": -np.inf}
+    state = {
+        "evals": 0,
+        "best_obj": np.inf,
+        "best_rl": -np.inf,
+        "t_last_start": None,
+        "avg_eval_s": None,
+        "total_evals_est": None,
+    }
+
+    # estimate total evals once
+    if (maxiter_hint is not None) and (popsize_hint is not None):
+        pop = popsize_hint * len(var_keys)
+        state["total_evals_est"] = pop * (maxiter_hint + 1)  # initial pop + iterations
 
     def _objective(x: np.ndarray) -> float:
         state["evals"] += 1
         params = _pack_params(base_parameters, var_keys, x)
 
-        if log_every_eval:
-            short = ", ".join([f"{k}={params[k]/mm:.3f}mm" for k in var_keys])
-            logger.info(f"[eval {state['evals']:04d}] Simulating with {short}")
+        # start timer for this eval
+        state["t_last_start"] = time.perf_counter()
 
-        ok, payload = _safe_sim_rl_multi(params, timeout=timeout, solver_name=solver_name, logger=logger)
+        ok, payload = _safe_sim_rl_multi(
+            params,
+            timeout=timeout,
+            solver_name=solver_name,
+            logger=logger,
+            hb_print=True,
+            hb_min_interval=10.0,
+            eta_done_evals=(state["evals"] - 1),             # completed before this eval
+            eta_total_evals=state["total_evals_est"],
+            eta_avg_eval_s=state["avg_eval_s"],
+        )
+        # update avg eval duration
+        dt = time.perf_counter() - state["t_last_start"]
+        if state["avg_eval_s"] is None:
+            state["avg_eval_s"] = dt
+        else:
+            state["avg_eval_s"] = 0.8 * state["avg_eval_s"] + 0.2 * dt  # EMA smoothing
+            
         if not ok:
             logger.warn(f"[eval {state['evals']:04d}] simulation failed ({payload}); applying penalty {penalty_if_fail:g}")
             return float(penalty_if_fail)
@@ -455,9 +520,10 @@ def optimize_ifa(
     bounds_m = _ensure_bounds_in_meters(optimize_parameters)
     
     objective, var_keys = _objective_factory(
-        start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
-        bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
-        bandwidth_weight=bandwidth_weight, solver_name=solver_name, timeout=timeout
+    start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
+    bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
+    bandwidth_weight=bandwidth_weight, solver_name=solver_name, timeout=timeout,
+    maxiter_hint=maxiter, popsize_hint=popsize
     )
     bounds_list = [bounds_m[k] for k in var_keys]
 
