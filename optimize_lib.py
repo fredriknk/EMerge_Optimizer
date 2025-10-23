@@ -71,6 +71,36 @@ def _fmt_params_singleline_mm(params: dict, precision: int = 3) -> str:
         pairs.append(f"'{k}': {s}")
     return "{ " + ", ".join(pairs) + " }"
 
+def _fmt_params_singleline_raw(params: dict, float_fmt: str = ".9g", sort_keys: bool = False) -> str:
+    """
+    Return a single-line, copy-pastable dict with RAW values from `params`.
+    - Geometry stays in meters (no '*mm')
+    - Frequencies stay in Hz (no 'GHz')
+    - Floats/ints formatted with `float_fmt` (default '.9g'), others via repr()
+    - Set sort_keys=False to preserve insertion order
+    """
+    def norm_num(x):
+        try:
+            # handle numpy scalars cleanly
+            if hasattr(x, "item"):
+                x = x.item()
+        except Exception:
+            pass
+        return x
+
+    items = params.items()
+    if sort_keys:
+        items = sorted(items, key=lambda kv: kv[0])
+
+    parts = []
+    for k, v in items:
+        v = norm_num(v)
+        if isinstance(v, (int, float)):
+            s = format(v, float_fmt)
+        else:
+            s = repr(v)
+        parts.append(f"'{k}': {s}")
+    return "{ " + ", ".join(parts) + " }"
 
 def _ensure_bounds_in_meters(optimize_parameters: Dict[str, Tuple[float, float]]) -> Dict[str, Tuple[float, float]]:
     cleaned = {}
@@ -160,7 +190,7 @@ def _objective_factory(
             if improved:
                 state["best_obj"] = obj
                 state["best_rl"]  = rl_dB
-                logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_mm(params, precision=3))
+                logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_raw(params))
 
             return obj
 
@@ -177,6 +207,7 @@ def _objective_factory(
 
 
 # ---------- Top-level optimizer with iteration callback ----------
+# ---------- Top-level optimizer with iteration callback ----------
 def optimize_ifa(
     start_parameters: Dict[str, float],
     optimize_parameters: Dict[str, Tuple[float, float]],
@@ -189,6 +220,9 @@ def optimize_ifa(
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
     bandwidth_weight: float = 0.0,
+    solver: em.EMSolver = em.EMSolver.CUDSS,
+    include_start: bool = True,        # NEW: ensure start point is evaluated
+    start_jitter: float = 0.05         # NEW: fraction of bound span for Gaussian jitter
 ):
     logger = OptLogger(enabled=True)
 
@@ -220,6 +254,33 @@ def optimize_ifa(
         logger.info(f"[iter {iter_state['iter']:03d}] Best-so-far: {msg}  (convergence={convergence:.3g})")
         return False  # continue
 
+    # ---- NEW: build initial population that includes your exact start (clamped) + jittered neighbors
+    init_arg = "latinhypercube"  # SciPy default if we don't override
+    if include_start:
+        dim = len(var_keys)
+        pop_n = popsize * dim
+        rng = np.random.default_rng(seed)
+
+        # Exact start vector, clamped to bounds
+        start_vec = np.array(
+            [np.clip(start_parameters[k], *bounds_m[k]) for k in var_keys], dtype=float
+        )
+
+        init_pop = [start_vec]
+        for _ in range(pop_n - 1):
+            row = start_vec.copy()
+            for i, k in enumerate(var_keys):
+                lo, hi = bounds_m[k]
+                span = hi - lo
+                if start_jitter and span > 0:
+                    row[i] = np.clip(rng.normal(loc=start_vec[i], scale=start_jitter*span), lo, hi)
+                else:
+                    row[i] = rng.uniform(lo, hi)
+            init_pop.append(row)
+        init_pop = np.vstack(init_pop)
+        init_arg = init_pop  # supply explicit initial population to DE
+        logger.info(f"Starting differential evolution with start included; pop={pop_n}, dim={dim}, jitter={start_jitter:.3f}")
+
     logger.info(f"Starting differential evolution: maxiter={maxiter}, popsize={popsize}, polish={polish}")
     result = differential_evolution(
         objective,
@@ -229,8 +290,10 @@ def optimize_ifa(
         seed=seed,
         polish=polish,
         updating='deferred',
-        workers=1,          # set to -1 if thread-safe
-        callback=_cb
+        workers=1,          # set to -1 if thread-safe (and ensure __main__ guard)
+        callback=_cb,
+        tol=0,              # run full maxiter; no early stop on convergence
+        init=init_arg       # <- includes your start (and jittered samples) if include_start=True
     )
 
     best_params = _pack_params(start_parameters, var_keys, result.x)
@@ -248,6 +311,9 @@ def optimize_ifa(
     logger.info(f"Best RL@f0 = {rl_best:.2f} dB")
     for k in var_keys:
         logger.info(f"  {k:>24s} = {best_params[k]/mm:.3f} mm")
+
+    # Single-line, copy-pastable RAW dict for the winner
+    logger.info("FINAL BEST PARAMS: " + _fmt_params_singleline_raw(best_params))
 
     plot_sp(freq_dense, S11)
 

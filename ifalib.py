@@ -137,11 +137,12 @@ def build_mifa(params,
                view_model=False,
                run_simulation=True,
                compute_farfield=True,
-               loglevel="ERROR"):
+               loglevel="ERROR",
+               solver=em.EMSolver.PARDISO):
 
     if model is None:
         model = em.Simulation('PatchAntenna', loglevel=loglevel)
-        model.set_solver(em.EMSolver.CUDSS)
+        model.set_solver(solver)
         model.check_version("1.1.0") # Checks version compatibility.
 
     # --- Unit and simulation parameters --------------------------------------
@@ -183,8 +184,8 @@ def build_mifa(params,
     dielectric = em.geo.Box(wsub, hsub, th,
                             position=(-wsub/2, -hsub/2, -th))
 
-    lambda1 = em.lib.C0 / ((f1))
-    lambda2 = em.lib.C0 / ((f2))
+    lambda1 = em.lib.C0 / ((f1))*params['lambda_scale']
+    lambda2 = em.lib.C0 / ((f2))*params['lambda_scale']
     # Asymmetric margins (scale if you need to shrink/grow the domain)
     fwd     = 0.50*lambda2   #in antenna direction
     back    = 0.30*lambda2   #behind PCB
