@@ -1,7 +1,7 @@
-from optimize_lib import optimize_ifa
+import multiprocessing as mp
+from optimize_lib import optimize_ifa, mm  # and anything else you use
 import emerge as em
 
-mm = 1e-3
 parameters = { 
     'ifa_h': 10.0*mm,
     'ifa_l': 100*mm,
@@ -38,29 +38,29 @@ optimize_parameters = {
     'ifa_fp': (3.5*mm, 10*mm),
     'ifa_e2':  (0.5*mm, 10*mm),
 }
+def main():
+    best_params, result, summary = optimize_ifa(
+        start_parameters=parameters,
+        optimize_parameters=optimize_parameters,
+        maxiter=30,
+        popsize=14,
+        seed=1,
+        polish=False,
+        solver=em.EMSolver.CUDSS,
+        timeout=200.0,  
+        bandwidth_target_db=-10.0,
+        bandwidth_span=(parameters['f1'], parameters['f2']),
+        bandwidth_weight=2.0,
+        include_start=True,
+        start_jitter=0.05,
+        log_every_eval=False,
+    )
+    print("FINAL BEST PARAMS:", best_params)
 
-best_params, result, summary = optimize_ifa(
-    start_parameters=parameters,
-    optimize_parameters=optimize_parameters,
-    maxiter=30,           # bump for better results (time ↑)
-    popsize=14,           # population size per dim
-    seed=1,
-    polish=True,
-    solver=em.EMSolver.PARDISO,
-    timeout=200.0,
-    # Optional bandwidth shaping (uncomment if you want it)
-    bandwidth_target_db=-10.0,
-    bandwidth_span=(parameters['f1'], parameters['f2']),
-    bandwidth_weight=2.0,   # reward wide -10 dB band
-)
-
-print("Success:", summary["optimizer_success"])
-print("Message:", summary["optimizer_message"])
-print("Objective value (=-RL-BWbonus):", summary["optimizer_fun"])
-print("Best RL at f0 (dB):", summary["best_return_loss_dB_at_f0"])
-print("Best parameters (m):")
-for k, v in summary["best_params"].items():
-    if k.endswith(('_h','_w','_l','_e','_wf','_fp','_te','_size','board_wsub','board_hsub','board_th')):
-        print(f"  {k:>24s}: {v/mm:.3f} mm")
-    else:
-        print(f"  {k:>24s}: {v}")
+if __name__ == "__main__":
+    mp.freeze_support()  # required on Windows for spawn
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass  # already set
+    main()
