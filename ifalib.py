@@ -164,8 +164,9 @@ def build_mifa(params,
     
     via_size = params['via_size'] 
     mifa_meander = params['mifa_meander'] 
+    
     mifa_meander_edge_distance = params['mifa_meander_edge_distance'] 
-    mifa_tipdistance = params['mifa_tipdistance'] 
+    mifa_tipdistance = params.get('same_edge_distances', mifa_meander_edge_distance)
 
     board_wsub = params['board_wsub']          # substrate width
     board_hsub = params['board_hsub']          # substrate length
@@ -185,8 +186,8 @@ def build_mifa(params,
     dielectric = em.geo.Box(board_wsub, board_hsub, board_th,
                             position=(-board_wsub/2, -board_hsub/2, -board_th))
 
-    lambda1 = em.lib.C0 / ((f1))*params['lambda_scale']
-    lambda2 = em.lib.C0 / ((f2))*params['lambda_scale']
+    lambda1 = em.lib.C0 / ((f1))*params.get('lambda_scale',1)
+    lambda2 = em.lib.C0 / ((f2))*params.get('lambda_scale',1)
     # Asymmetric margins (scale if you need to shrink/grow the domain)
     fwd     = 0.50*lambda2   #in antenna direction
     back    = 0.30*lambda2   #behind PCB
