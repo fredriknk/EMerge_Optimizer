@@ -57,56 +57,59 @@ def build_mifa_plates(
     usable_x = substrate_width - ifa_e - ifa_e2
     length_diff = 0.0
 
-    if ifa_l < usable_x:
+    if ifa_l <= usable_x:
         # Simple straight radiator
         stop_main = start_main + np.array([ifa_l, -ifa_w2, 0.0])
         add_box_from_start_stop(start_main, stop_main, "main")
         return plates  # done
 
     # We need tip (vertical) + potential meanders
-    start_main = np.array([-ifa_fp+ifa_e, ifa_h, 0.0]) + tl
-    stop_main = start_main + np.array([usable_x, -ifa_w2, 0.0])
+    start_main = np.array([-ifa_fp+ifa_e, ifa_h-ifa_w2, 0.0]) + tl
+    stop_main = start_main + np.array([usable_x, ifa_w2, 0.0])
     # Don't append yet; we may add tip/meanders first depending on branch
     length_diff = ifa_l - usable_x
 
-    max_length_mifa = ifa_h - mifa_meander_edge_distance -ifa_w2
-    max_edgelength_tip = ifa_h - mifa_tipdistance
+    max_length_mifa = ifa_h - mifa_meander_edge_distance-ifa_w2
+    max_edgelength_tip = ifa_h - mifa_tipdistance-ifa_w2
 
     # --- Tip element branch ---
     # Tip starts at right end of main, goes upward (positive y) then down
-    tip_anchor = stop_main + np.array([0.0, +ifa_w2, 0.0])
+    tip_anchor = stop_main + np.array([0.0, 0.0, 0.0])
 
-    if length_diff < max_edgelength_tip:
+    if length_diff <= max_edgelength_tip:
         # Only a partial tip is needed
         tip_start = tip_anchor
-        tip_stop = tip_start + np.array([-ifa_w2, -length_diff - ifa_w2, 0.0])
+        tip_stop = tip_start + np.array([-ifa_w2, -length_diff-ifa_w2, 0.0])
         add_box_from_start_stop(tip_start, tip_stop, "tip_partial")
 
         add_base()
         return plates
-
+    #print(f"length_diff={length_diff*1e3:.2f} mm")
     # Full tip first
     tip_start = tip_anchor
-    tip_stop = tip_start + np.array([-ifa_w2, -max_edgelength_tip, 0.0])
+    tip_stop = tip_start + np.array([-ifa_w2, -max_edgelength_tip-ifa_w2, 0.0])
     add_box_from_start_stop(tip_start, tip_stop, "tip_full")
+    
     length_diff -= max_edgelength_tip
-
+    #print(f"max_edgelength_tip={max_edgelength_tip*1e3:.2f} mm used, remaining length_diff={length_diff*1e3:.2f} mm")
     # --- Meanders for remaining length ---
     # We meander down/up in y by fractions of max_length_mifa, stepping in x by (mifa_meander+ifa_w2)
+    #print(f"max_length_mifa={max_length_mifa*1e3:.2f} mm")
     if length_diff > 0:
-        ldiff_ratio = length_diff / (max_length_mifa * 2.0 + mifa_meander)  # each meander adds this much normalized length
+        ldiff_ratio = length_diff / (max_length_mifa * 2.0)  # each meander adds this much normalized length
         # Continue from tip bottom-left edge
-        current_stop = tip_start + np.array([-ifa_w2, 0.0, 0.0])
+        current_stop = tip_start + np.array([0.0, 0.0, 0.0])
 
         while ldiff_ratio > 0:
             current_meander = min(1.0, ldiff_ratio)
             ldiff_ratio -= current_meander
+            #print(f"  adding meander with ratio {current_meander:.3f}, remaining ldiff_ratio={ldiff_ratio:.3f}")
             if current_meander < 0.05*mm:
                 break
 
             # Top horizontal of meander (leftwards)
-            seg1_start = current_stop + np.array([ifa_w2, 0.0, 0.0])
-            seg1_stop  = seg1_start + np.array([-mifa_meander - ifa_w2, -ifa_w2, 0.0])
+            seg1_start = current_stop + np.array([0.0, 0.0, 0.0])
+            seg1_stop  = seg1_start + np.array([-mifa_meander-ifa_w2, -ifa_w2, 0.0])
             add_box_from_start_stop(seg1_start, seg1_stop, "meander_top")
 
             # Down leg
@@ -115,17 +118,18 @@ def build_mifa_plates(
             add_box_from_start_stop(seg2_start, seg2_stop, "meander_down")
 
             # Bottom horizontal (rightwards)
-            seg3_start = seg2_stop
-            seg3_stop  = seg3_start + np.array([-mifa_meander - ifa_w2, ifa_w2, 0.0])
+            seg3_start = seg2_stop + np.array([0.0, ifa_w2, 0.0])
+            seg3_stop  = seg3_start + np.array([-mifa_meander - ifa_w2, -ifa_w2, 0.0])
             add_box_from_start_stop(seg3_start, seg3_stop, "meander_bottom")
 
             # Up leg
-            seg4_start = seg3_stop + np.array([+ifa_w2, -ifa_w2, 0.0])
-            seg4_stop  = seg4_start + np.array([-ifa_w2, current_meander * max_length_mifa+ifa_w2, 0.0])
+            seg4_start = seg3_stop + np.array([0, 0, 0.0])
+            seg4_stop  = seg4_start + np.array([+ifa_w2, current_meander * max_length_mifa+ifa_w2, 0.0])
             add_box_from_start_stop(seg4_start, seg4_stop, "meander_up")
 
-            current_stop = seg4_stop  # tail for the next loop
-        add_box_from_start_stop(start_main, current_stop + np.array([ifa_w2, -ifa_w2, 0.0]), "base_link")
+            current_stop = seg4_stop +  np.array([0.0, 0.0, 0.0])# tail for the next loop
+            
+        add_box_from_start_stop(start_main, current_stop + np.array([0, 0, 0.0]), "base_link")
 
     # Add the straight base last (if not already linked fully)
     #add_base()
@@ -166,7 +170,7 @@ def build_mifa(params,
     mifa_meander = params['mifa_meander'] 
     
     mifa_meander_edge_distance = params['mifa_meander_edge_distance'] 
-    mifa_tipdistance = params.get('same_edge_distances', mifa_meander_edge_distance)
+    mifa_tipdistance = params.get('mifa_tipdistance', mifa_meander_edge_distance)
 
     board_wsub = params['board_wsub']          # substrate width
     board_hsub = params['board_hsub']          # substrate length

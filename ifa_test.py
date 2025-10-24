@@ -152,30 +152,32 @@ def validate_ifa_params(p):
     
     
     derived["estimated_number_of_meanders_fit"] = int(max_num_meanders)
-    ant_stub = wsub-e1-e2-max_num_meanders*mlen-w2
+    
+    ant_stub = wsub-e1-e2-max_num_meanders*(mlen)-w2
+    
     single_meander_length = ifa_h-medge
     tip_length = ifa_h - mtip
-    max_length = (max_num_meanders*(mlen+single_meander_length))+ tip_length + ant_stub 
-    print(f"mlen: {mlen}, n_max: {n_max}, ifa_h: {ifa_h}, fp: {fp}, wf: {wf},mtip: {mtip}, medge: {medge}, wsub: {wsub}, e1: {e1}, e2: {e2}, w2: {w2}")
+    max_length = (max_num_meanders*(mlen+single_meander_length-w2))+ tip_length + ant_stub
+    print(f"mlen: {mlen}, single_meander: {single_meander_length}, tip_length: {tip_length}, ant_stub: {ant_stub}")
     derived["estimated_max_antenna_length_with_meanders"] = max_length
     return (errors, warnings, derived)
 
 parameters = {
-  "ifa_h": 0.02,
-  "ifa_l": 0.3158,
+  "ifa_h": 0.012,
+  "ifa_l": 0.013,
   "ifa_w1": 0.001,
-  "ifa_w2": 0.001,
+  "ifa_w2": 0.0005,
   "ifa_wf": 0.001,
-  "ifa_fp": 0.005,
+  "ifa_fp": 0.0005,
   "ifa_e": 0.0005,
   "ifa_e2": 0.0005,
   "ifa_te": 0.0005,
   "via_size": 0.0005,
-  "board_wsub": 0.031,
-  "board_hsub": 0.04,
+  "board_wsub": 0.012,
+  "board_hsub": 0.020,
   "board_th": 0.0015,
-  "mifa_meander": 0.002,
-  "mifa_tipdistance": 0.000,
+  "mifa_meander": 0.001,
+  "mifa_tipdistance": 0.003,
   "mifa_meander_edge_distance": 0.002,
   "f1": 700000000.0,
   "f0": 800000000.0,
@@ -185,7 +187,6 @@ parameters = {
   "mesh_wavelength_fraction": 0.5,
   "lambda_scale": 0.5
 }
-
 if __name__ == "__main__":
     # --- Example usage ---
     errs, warns, drv = validate_ifa_params(parameters)
