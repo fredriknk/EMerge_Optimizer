@@ -4,3 +4,4 @@
 *.log
 best_params_logs/
 *.json
+*ignore.py
