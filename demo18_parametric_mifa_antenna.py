@@ -20,9 +20,9 @@ This simulation is quite heavy and might take a while to fully compute.
 #| V____          _______________     __________  | |  \_0 point
 #|               |    ___  ___   |___|  ______  | | |
 #|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
-#|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
-#|               |   |   ||                   w2  | | |                  
-#|_______________|___|___||_______________________| |_|
+#|               |   |   ||     <----->      |__|_|_|_|
+#|               |   |   ||   mifa_meander    w2  | | |mifa_tipdistance(Optional, 
+#|_______________|___|___||_______________________| |_|will be set to edge distance if 0)
 #| <---ifa_e---->| w1|   wf\                      | |
 #|               |__fp___|  \                     | |
 #|                       |    feed point          | |
@@ -114,16 +114,11 @@ mifa_21x90_2_45ghz = {
     'via_size': 0.0005,  
     'lambda_scale': 1 }
 
-test = { 'ifa_h': 0.0296763865, 'ifa_l': 0.130751561, 'ifa_w1': 0.000756940097, 'ifa_w2': 0.000848497577, 'ifa_wf': 0.00123205059, 'ifa_fp': 0.00905771941, 'ifa_e': 0.0005, 'ifa_e2': 0.00285990861, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.002, 'mifa_meander_edge_distance': 0.003, 'mifa_tipdistance': 0.003, 'f1': 700000000, 'f0': 800000000, 'f2': 900000000, 'freq_points': 3, 'mesh_boundry_size_divisor': 0.5, 'mesh_wavelength_fraction': 0.5, 'lambda_scale': 0.5 }
+parameters = mifa_21x90_2_45ghz
 
-parameters = test
-
-# parameters['mesh_boundry_size_divisor'] = 0.33
-# parameters['mesh_wavelength_fraction'] = 0.2
-# parameters['lambda_scale']=1
-# parameters['freq_points'] = 5
-
-model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,view_mesh=True, view_model=True,run_simulation=True,compute_farfield=False,loglevel="INFO",solver=em.EMSolver.CUDSS)
+model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
+                                                   view_mesh=True, view_model=True,run_simulation=True,compute_farfield=False,
+                                                   loglevel="INFO",solver=em.EMSolver.CUDSS)
 
 if S11 is not None:
     print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")
