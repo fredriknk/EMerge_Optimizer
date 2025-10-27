@@ -646,7 +646,8 @@ def optimize_ifa(
         workers=1,          # set to -1 if thread-safe (and ensure __main__ guard)
         callback=_cb,
         tol=0,              # run full maxiter; no early stop on convergence
-        init=init_arg       # <- includes your start (and jittered samples) if include_start=True
+        init=init_arg,       # <- includes your start (and jittered samples) if include_start=True
+        constraints=constraints_arg,  # (ignored if None)
     )
 
     best_params = _pack_params(start_parameters, var_keys, result.x)
