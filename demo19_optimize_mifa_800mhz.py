@@ -61,15 +61,44 @@ parameters = {
     'lambda_scale': 0.5,
 }
 
+parameters = {
+  "ifa_h": 0.026721961022660216,
+  "ifa_l": 0.13516767907510804,
+  "ifa_w1": 0.0007747970923122423,
+  "ifa_w2": 0.0008121799266081413,
+  "ifa_wf": 0.0012112860858232545,
+  "ifa_fp": 0.007857536003039053,
+  "ifa_e": 0.0005,
+  "ifa_e2": 0.0005,
+  "ifa_te": 0.0005,
+  "via_size": 0.0005,
+  "board_wsub": 0.03,
+  "board_hsub": 0.11,
+  "board_th": 0.0015,
+  "mifa_meander": 0.002,
+  "mifa_meander_edge_distance": 0.003,
+  "f1": 791000000.0,
+  "f0": 826000000.0,
+  "f2": 862000000.0,
+  "freq_points": 3.0,
+  "mesh_boundry_size_divisor": 0.5,
+  "mesh_wavelength_fraction": 0.5,
+  "lambda_scale": 0.5
+}
+
+
+
+
 # IMPORTANT: set bounds in METERS
 BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
-    'ifa_h':  (10.0*mm, 30.0*mm),
-    'ifa_l':  (50*mm,   200*mm),
-    'ifa_w1': (0.6*mm,  1.25*mm),
-    'ifa_w2': (0.6*mm,  1.25*mm),
-    'ifa_wf': (0.6*mm,  1.25*mm),
-    'ifa_fp': (3.5*mm,  10*mm),
-    'ifa_e2': (0.5*mm,  10*mm),
+    'ifa_h':  (18.0*mm, 30.0*mm),
+    'ifa_l':  (105*mm,   135*mm),
+    'ifa_w1': (0.6*mm,  2*mm),
+    'ifa_w2': (0.6*mm,  1*mm),
+    'ifa_wf': (0.6*mm,  1*mm),
+    'ifa_fp': (6*mm,  12*mm),
+    'ifa_mifa_meander_edge_distance': (2*mm, 15*mm),
+    "mifa_meander": (2*mm, 3*mm),
 }
 
 
@@ -93,9 +122,9 @@ def main():
     run_stage(
         f"{SIMULATION_NAME}_quick",
         p, bounds,
-        maxiter=4, popsize=12, seed=1,
+        maxiter=4, popsize=15, seed=2,
         solver_name=SOLVER, timeout=120.0,
-        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=1.5,
+        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=30.0,
         include_start=False, start_jitter=0.05, log_every_eval=False
     )
 
@@ -111,7 +140,7 @@ def main():
         p, bounds,
         maxiter=8, popsize=6, seed=2,
         solver_name=SOLVER, timeout=150.0,
-        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=2.0,
+        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=30.0,
         include_start=True, start_jitter=0.03, log_every_eval=False
     )
 
@@ -127,7 +156,7 @@ def main():
         p, bounds,
         maxiter=10, popsize=4, seed=3,
         solver_name=SOLVER, timeout=180.0,
-        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=2.2,
+        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=30.0,
         include_start=True, start_jitter=0.02, log_every_eval=False
     )
 
