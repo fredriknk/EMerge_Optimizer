@@ -3,3 +3,4 @@
 *.csv
 *.log
 best_params_logs/
+*gitignore.py
