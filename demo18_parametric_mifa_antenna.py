@@ -114,13 +114,7 @@ mifa_21x90_2_45ghz = {
     'via_size': 0.0005,  
     'lambda_scale': 1 }
 
-test = { 'ifa_h': 0.0285560506, 'ifa_l': 0.113574096, 'ifa_w1': 0.000993614567, 'ifa_w2': 0.000760465878, 'ifa_wf': 0.000626000861, 'ifa_fp': 0.00885211254, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00215998356, 'mifa_meander_edge_distance': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundry_size_divisor': 0.5, 'mesh_wavelength_fraction': 0.5, 'lambda_scale': 0.5, 'ifa_mifa_meander_edge_distance': 0.00212831432 }
-parameters = test
-
-parameters['mesh_boundry_size_divisor'] = 0.33
-parameters['mesh_wavelength_fraction'] = 0.2
-parameters['lambda_scale']=1
-parameters['freq_points'] = 5
+parameters = mifa_21x90_2_45ghz
 
 model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
                                                    view_mesh=True, view_model=True,run_simulation=True,compute_farfield=False,

@@ -1,6 +1,7 @@
 from pyexpat import model
 import emerge as em
 import numpy as np
+from ifa_validation import validate_ifa_params
 
 def build_mifa_plates(
     *,
@@ -142,8 +143,8 @@ def build_mifa(params,
                run_simulation=True,
                compute_farfield=True,
                loglevel="ERROR",
-               solver=em.EMSolver.PARDISO):
-
+               solver=em.EMSolver.PARDISO,
+               validate_ifa_antenna=True):
     if model is None:
         model = em.Simulation('PatchAntenna', loglevel=loglevel)
         model.set_solver(solver)
@@ -153,8 +154,14 @@ def build_mifa(params,
     mm = 0.001              # meters per millimeter
 
     # --- Antenna geometry dimensions ----------------------------------------
+    if validate_ifa_antenna == True:
+        errs, warns, drv = validate_ifa_params(params)
+        if errs:
+            for err in errs:
+                print(f"Parameter validation error: {err}")
+            raise ValueError("IFA parameter validation failed.")
 
-    ifa_h = params['ifa_h'] 
+    ifa_h = params['ifa_h']
     ifa_l = params['ifa_l'] 
     ifa_w1 = params['ifa_w1'] 
     ifa_w2 = params['ifa_w2'] 
