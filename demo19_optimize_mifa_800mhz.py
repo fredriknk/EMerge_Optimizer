@@ -11,7 +11,7 @@ This simulation is very heavy and might take a while to fully compute.
 Its very reccomended to use a CUDA capable solver for this demo.
 
 The optimizer spawns single simulations to isolate from native chrashes
-the ouptut is logged to 
+the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 
 #############################################################
 #|------------- substrate_width -------------------|

@@ -524,11 +524,12 @@ def run_stage(stage_name: str, params: dict, opt_bounds: Dict[str, Tuple[float, 
         log_every_eval=log_every_eval,
         stage_name=stage_name
     )
+    os.makedirs("best_params_logs", exist_ok=True)
     print(f"[{stage_name}] best RL@f0: {summary['best_return_loss_dB_at_f0']:.2f} dB")
     print(f"[{stage_name}] best params: {_fmt_params_singleline_raw(summary['best_params'], sort_keys=False)}")
-    append_trace("best_trace.csv", stage_name, summary["optimizer_nfev"],
+    append_trace("best_params_logs/best_trace.csv", stage_name, summary["optimizer_nfev"],
                  summary["best_return_loss_dB_at_f0"], summary["optimizer_fun"], summary["best_params"])
-    write_json(f"best_params_{stage_name}.json", summary["best_params"])
+    write_json(f"best_params_logs/best_params_{stage_name}.json", summary["best_params"])
     # Update our live params for the next stage
     params.update(summary["best_params"])
     return best_params, result, summary
