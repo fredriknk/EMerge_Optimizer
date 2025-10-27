@@ -392,7 +392,7 @@ def _objective_factory(
             return float(penalty_if_fail)
         
         ok, payload = _safe_sim_rl_multi(
-            ok_params,
+            params,
             timeout=timeout,
             solver_name=solver_name,
             logger=logger,
