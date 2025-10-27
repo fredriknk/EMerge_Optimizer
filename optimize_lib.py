@@ -48,6 +48,37 @@ def _precheck_params(p: dict):
     if hsub is not None and "ifa_h" in p and "ifa_te" in p:
         if float(hsub) - float(p["ifa_h"]) - float(p["ifa_te"]) <= 0.0:
             raise ValueError("substrate height must be > ifa_h + ifa_te (ground clearance > 0)")
+        
+# -------- Infeasible handling (uses your validator) --------
+def _is_valid_params(params: dict) -> Tuple[bool, List[str]]:
+    try:
+        from ifa_validation import validate_ifa_params
+    except Exception as e:
+        # If validator missing, consider everything valid (no surprise crashes)
+        return True, [f"validator_unavailable: {e}"]
+    errs, warns, drv = validate_ifa_params(params)
+    return (len(errs) == 0), errs
+
+def _random_valid_vector(
+    base_parameters: Dict[str, float],
+    var_keys: List[str],
+    bounds_m: Dict[str, Tuple[float, float]],
+    rng: np.random.Generator,
+    *,
+    max_tries: int = 500
+) -> np.ndarray:
+    """Sample uniformly in bounds until validate_ifa_params() passes."""
+    for _ in range(max_tries):
+        row = []
+        for k in var_keys:
+            lo, hi = bounds_m[k]
+            row.append(rng.uniform(lo, hi))
+        params = _pack_params(base_parameters, var_keys, np.array(row, dtype=float))
+        ok, _ = _is_valid_params(params)
+        if ok:
+            return np.array(row, dtype=float)
+    # Fallback: return uniform draw (may be invalid; objective will penalize)
+    return np.array([rng.uniform(*bounds_m[k]) for k in var_keys], dtype=float)
 
 
 # --- child worker that runs one simulation and returns (freq_dense, RL_dB array) ---
@@ -353,9 +384,15 @@ def _objective_factory(
 
         # start timer for this eval
         state["t_last_start"] = time.perf_counter()
-
+        ok_params, errs = _is_valid_params(params)
+        if not ok_params:
+            if logger:
+                logger.warn(f"[eval {state['evals']:04d}] infeasible params -> penalty; reasons: {', '.join(errs[:3])}"
+                            + ("..." if len(errs) > 3 else ""))
+            return float(penalty_if_fail)
+        
         ok, payload = _safe_sim_rl_multi(
-            params,
+            ok_params,
             timeout=timeout,
             solver_name=solver_name,
             logger=logger,
@@ -544,32 +581,59 @@ def optimize_ifa(
         return False  # continue
 
     # ---- NEW: build initial population that includes your exact start (clamped) + jittered neighbors
-    init_arg = "latinhypercube"  # SciPy default if we don't override
+    init_arg = "latinhypercube"
     if include_start:
         dim = len(var_keys)
         pop_n = popsize * dim
         rng = np.random.default_rng(seed)
 
-        # Exact start vector, clamped to bounds
-        start_vec = np.array(
-            [np.clip(start_parameters[k], *bounds_m[k]) for k in var_keys], dtype=float
-        )
+        # Exact start vector, clamped
+        start_vec = np.array([np.clip(start_parameters[k], *bounds_m[k]) for k in var_keys], dtype=float)
+        start_params = _pack_params(start_parameters, var_keys, start_vec)
+        ok_start, _ = _is_valid_params(start_params)
 
-        init_pop = [start_vec]
-        for _ in range(pop_n - 1):
-            row = start_vec.copy()
+        init_rows = []
+        if ok_start:
+            init_rows.append(start_vec)
+        else:
+            # Try to nudge the start a bit toward feasibility within bounds
+            # (uniform jitter up to 5% span), else skip it.
+            jittered = start_vec.copy()
             for i, k in enumerate(var_keys):
                 lo, hi = bounds_m[k]
                 span = hi - lo
-                if start_jitter and span > 0:
-                    row[i] = np.clip(rng.normal(loc=start_vec[i], scale=start_jitter*span), lo, hi)
-                else:
-                    row[i] = rng.uniform(lo, hi)
-            init_pop.append(row)
-        init_pop = np.vstack(init_pop)
-        init_arg = init_pop  # supply explicit initial population to DE
-        logger.info(f"Starting differential evolution with start included; pop={pop_n}, dim={dim}, jitter={start_jitter:.3f}")
+                jittered[i] = float(np.clip(rng.normal(loc=start_vec[i], scale=0.05*span), lo, hi))
+            if _is_valid_params(_pack_params(start_parameters, var_keys, jittered))[0]:
+                init_rows.append(jittered)
 
+        # Fill the rest with valid randoms
+        while len(init_rows) < pop_n:
+            init_rows.append(_random_valid_vector(start_parameters, var_keys, bounds_m, rng))
+
+        init_pop = np.vstack(init_rows)
+        init_arg = init_pop
+        logger.info(f"Starting differential evolution with validated init; pop={pop_n}, dim={dim} "
+                    f"(seeded {1 if ok_start else 0} start)")
+
+    constraints_arg = None
+    try:
+        from scipy.optimize import NonlinearConstraint
+
+        def _feas_margin(x: np.ndarray) -> float:
+            """
+            Return >= 0 for feasible, < 0 for infeasible.
+            We return +1.0 if valid, else -1.0 * min(5, n_errs) to give DE a signal.
+            """
+            params = _pack_params(start_parameters, var_keys, x)
+            ok, errs = _is_valid_params(params)
+            return 1.0 if ok else -float(min(5, max(1, len(errs))))
+
+        # Box: [0, +inf) feasible
+        constraints_arg = (NonlinearConstraint(_feas_margin, 0.0, np.inf),)
+        logger.info("Nonlinear feasibility constraint enabled.")
+    except Exception as e:
+        logger.warn(f"NonlinearConstraint unavailable; continuing without explicit constraints ({e}).")
+    
     logger.info(f"Starting differential evolution: maxiter={maxiter}, popsize={popsize}, polish={polish}")
     result = differential_evolution(
         objective,
