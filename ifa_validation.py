@@ -102,8 +102,8 @@ def validate_ifa_params(p):
     # --- Your specific meander rules ---
 
     # 1) "mifa_meander < 2*w2 will be too small"
-    if mifa_meander < 2*ifa_w2:
-        errors.append(f"mifa_meander={mifa_meander*1e3:.2f} mm is < 2*w2={2*ifa_w2*1e3:.2f} mm (too small for a useful meander).")
+    if mifa_meander < 2*ifa_w2 + clearance:
+        errors.append(f"mifa_meander={mifa_meander*1e3:.2f} mm is < 2*w2 + clearance={(2*ifa_w2+clearance)*1e3:.4f} mm (too small for a useful meander).")
 
     # 2) "if mifa_meander_edge_distance or mifa_tipdistance is larger than ifa_h-w2 it won't meander"
     vertical_room = ifa_h - ifa_w2
@@ -199,6 +199,7 @@ if __name__ == "__main__":
         "board_hsub": 0.020,
         "board_th": 0.0015,
         "mifa_meander": 0.002,
+        #"mifa_tipdistance": 0.003,
         "mifa_meander_edge_distance": 0.011,
         "f1": 700000000.0,
         "f0": 800000000.0,
@@ -207,8 +208,34 @@ if __name__ == "__main__":
         "mesh_boundry_size_divisor": 0.5,
         "mesh_wavelength_fraction": 0.5,
         "lambda_scale": 0.5,
+        "clearance": 0.0003,
         }
     
+    parameters = {
+        "ifa_h": 0.026721961022660216,
+        "ifa_l": 0.13516767907510804,
+        "ifa_w1": 0.0007747970923122423,
+        "ifa_w2": 0.0008121799266081413,
+        "ifa_wf": 0.0012112860858232545,
+        "ifa_fp": 0.007857536003039053,
+        "ifa_e": 0.0005,
+        "ifa_e2": 0.0005,
+        "ifa_te": 0.0005,
+        "via_size": 0.0005,
+        "board_wsub": 0.03,
+        "board_hsub": 0.11,
+        "board_th": 0.0015,
+        "mifa_meander": 1.9244e-03,
+        "mifa_meander_edge_distance": 0.003,
+        "f1": 791000000.0,
+        "f0": 826000000.0,
+        "f2": 862000000.0,
+        "freq_points": 3.0,
+        "mesh_boundry_size_divisor": 0.5,
+        "mesh_wavelength_fraction": 0.5,
+        "lambda_scale": 0.5,
+        "clearance": 0.0003,
+        }
     errs, warns, drv = validate_ifa_params(parameters)
 
     if errs:
