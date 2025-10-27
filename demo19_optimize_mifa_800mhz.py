@@ -83,7 +83,8 @@ parameters = {
   "freq_points": 3.0,
   "mesh_boundry_size_divisor": 0.5,
   "mesh_wavelength_fraction": 0.5,
-  "lambda_scale": 0.5
+  "lambda_scale": 0.5,
+  "clearance": 0.0003,
 }
 
 
@@ -91,14 +92,14 @@ parameters = {
 
 # IMPORTANT: set bounds in METERS
 BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
-    'ifa_h':  (18.0*mm, 30.0*mm),
+    'ifa_h':  (10.0*mm, 35.0*mm),
     'ifa_l':  (105*mm,   135*mm),
     'ifa_w1': (0.6*mm,  2*mm),
     'ifa_w2': (0.6*mm,  1*mm),
     'ifa_wf': (0.6*mm,  1*mm),
-    'ifa_fp': (6*mm,  12*mm),
-    'ifa_mifa_meander_edge_distance': (2*mm, 15*mm),
-    "mifa_meander": (2*mm, 3*mm),
+    'ifa_fp': (2*mm,  12*mm),
+    'ifa_mifa_meander_edge_distance': (2*mm, 20*mm),
+    "mifa_meander": (1.2*mm, 3*mm),
 }
 
 
@@ -122,7 +123,7 @@ def main():
     run_stage(
         f"{SIMULATION_NAME}_quick",
         p, bounds,
-        maxiter=4, popsize=15, seed=2,
+        maxiter=4, popsize=20, seed=99,
         solver_name=SOLVER, timeout=120.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']), bandwidth_weight=30.0,
         include_start=False, start_jitter=0.05, log_every_eval=False
