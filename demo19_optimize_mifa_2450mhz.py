@@ -5,7 +5,7 @@ from optimize_lib import run_stage,shrink_bounds_around_best, write_json, mm, _f
 """ MIFA OPTIMIZATION DEMO
 
 In this demo we build mifa antenna geometry and optimize it for operation
-around 800MHz with goals for low reflection and wide bandwidth.
+around 2450MHz with goals for low reflection and wide bandwidth.
 
 This simulation is very heavy and might take a while to fully compute.
 Its very reccomended to use a CUDA capable solver for this demo.
@@ -36,77 +36,49 @@ Note: ifa_l is total length including meanders and tip
 """
 
 parameters = { 
-    'ifa_h': 10.0*mm,
-    'ifa_l': 100*mm,
-    'ifa_w1': 0.619*mm,
+    'ifa_h': 1.0*mm,
+    'ifa_l': 20*mm,
+    'ifa_w1': 0.5*mm,
     'ifa_w2': 0.5*mm,
     'ifa_wf': 0.5*mm,
     'ifa_fp': 2*mm,
     'ifa_e': 0.5*mm,
     'ifa_e2': 0.5*mm,
     'ifa_te': 0.5*mm,
-    'via_size': 0.5*mm,
-    'board_wsub': 30*mm,
-    'board_hsub': 110*mm,
+    'via_size': 0.3*mm,
+    'board_wsub': 14*mm,
+    'board_hsub': 25*mm,
     'board_th': 1.5*mm,
-    'mifa_meander': 2*mm,
-    'mifa_meander_edge_distance': 3*mm,
-    'mifa_tipdistance': 3*mm,
-    'f1': 0.7e9,
-    'f0': 0.8e9,
-    'f2': 0.9e9,
+    'mifa_meander': 1.5*mm,
+    'mifa_meander_edge_distance': 0.5*mm,
+    'mifa_tipdistance': 0.5*mm,
+    'f1': 2.4e9,
+    'f0': 2.45e9,
+    'f2': 2.5e9,
     'freq_points': 3,
     'mesh_boundry_size_divisor': 0.4,
     'mesh_wavelength_fraction': 0.4,
     'lambda_scale': 0.5,
 }
 
-parameters = {
-  "ifa_h": 0.026721961022660216,
-  "ifa_l": 0.13516767907510804,
-  "ifa_w1": 0.0007747970923122423,
-  "ifa_w2": 0.0008121799266081413,
-  "ifa_wf": 0.0012112860858232545,
-  "ifa_fp": 0.007857536003039053,
-  "ifa_e": 0.0005,
-  "ifa_e2": 0.0005,
-  "ifa_te": 0.0005,
-  "via_size": 0.0005,
-  "board_wsub": 0.03,
-  "board_hsub": 0.11,
-  "board_th": 0.0015,
-  "mifa_meander": 0.002,
-  "mifa_meander_edge_distance": 0.003,
-  "f1": 791000000.0,
-  "f0": 826000000.0,
-  "f2": 862000000.0,
-  "freq_points": 3.0,
-  "mesh_boundry_size_divisor": 0.5,
-  "mesh_wavelength_fraction": 0.5,
-  "lambda_scale": 0.5,
-  "clearance": 0.0003,
-}
-
-
-
 
 # IMPORTANT: set bounds in METERS
 BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
-    'ifa_h':  (10.0*mm, 35.0*mm),
-    'ifa_l':  (105*mm,   135*mm),
-    'ifa_w1': (0.6*mm,  2*mm),
-    'ifa_w2': (0.6*mm,  1*mm),
-    'ifa_wf': (0.6*mm,  1*mm),
-    'ifa_fp': (2*mm,  12*mm),
-    'ifa_mifa_meander_edge_distance': (2*mm, 20*mm),
-    "mifa_meander": (1.2*mm, 3*mm),
+    'ifa_h':  (3.0*mm, 7.0*mm),
+    'ifa_l':  (10*mm,   30*mm),
+    'ifa_w1': (0.3*mm,  1.5*mm),
+    'ifa_w2': (0.3*mm,  1*mm),
+    'ifa_wf': (0.3*mm,  1*mm),
+    'ifa_fp': (0.6*mm,  6*mm),
+    'ifa_mifa_meander_edge_distance': (0.5*mm, 4*mm),
+    "mifa_meander": (0.6*mm, 3*mm),
 }
 
 
 SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
-SIMULATION_NAME = "mifa_800mhz_optimization"
+SIMULATION_NAME = "mifa_2400mhz_optimization"
 
 def main():
     # Keep an independent copy we can mutate stage-by-stage
@@ -142,7 +114,7 @@ def main():
         maxiter=8, popsize=6, seed=2,
         solver_name=SOLVER, timeout=150.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=True, log_every_eval=False
+        include_start=False, log_every_eval=False
     )
 
     # ----------------- Stage 2: Refine deeper (tight bounds, denser sweep) -------
@@ -158,7 +130,7 @@ def main():
         maxiter=10, popsize=4, seed=3,
         solver_name=SOLVER, timeout=180.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=True, log_every_eval=False
+        include_start=False, log_every_eval=False
     )
 
     # Done: save final winner, print compact line again

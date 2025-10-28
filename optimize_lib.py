@@ -359,7 +359,6 @@ def _objective_factory(
     penalty_if_fail: float = 1e6,
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
-    bandwidth_weight: float = 0.0,
     solver_name: str = "PARDISO", timeout: float = 600.0, maxiter_hint: int = None, popsize_hint: int = None,
     stage_name: str = "default"):
     var_keys = list(var_bounds_m.keys())
@@ -418,48 +417,90 @@ def _objective_factory(
         freq = np.array(freq_list, dtype=float)
         rl   = np.array(rl_list, dtype=float)
 
-        # RL at f0 (interpolate)
+        # === Multi-frequency, bandwidth-oriented objective in linear |Γ| ===
+        # Helpers
+        def _gamma_from_rl_db(rl_db_arr: np.ndarray) -> np.ndarray:
+            # RL = -20*log10|Γ|  ->  |Γ| = 10^(-RL/20)
+            return 10.0**(-rl_db_arr/20.0)
+
+        # Interpolate RL at f0 for logging and (optional) center penalty
         f0 = float(params['f0'])
-        # robust interp: clamp to range
         f0_clamped = min(max(f0, freq.min()), freq.max())
         rl_f0 = float(np.interp(f0_clamped, freq, rl))
 
-        # Optional bandwidth reward over [f_lo, f_hi]
-        bandwidth_bonus = 0.0
-        frac_ok = None
-        if (bandwidth_target_db is not None) and (bandwidth_span is not None) and (bandwidth_weight > 0.0):
+        # If we have a target and span -> optimize bandwidth (band-integrated excess |Γ|)
+        use_band = (bandwidth_target_db is not None) and (bandwidth_span is not None)
+        frac_ok = None  # for logging
+
+        if use_band:
             f_lo, f_hi = float(bandwidth_span[0]), float(bandwidth_span[1])
             if f_hi < f_lo:
                 f_lo, f_hi = f_hi, f_lo
             m = (freq >= f_lo) & (freq <= f_hi)
-            if np.any(m):
-                # fraction of points meeting/exceeding the |S11| target
-                frac_ok = float(np.mean(rl[m] >= abs(bandwidth_target_db)))
-                bandwidth_bonus = bandwidth_weight * frac_ok
-            else:
-                frac_ok = 0.0  # no points in band
+            if not np.any(m):
+                # Band does not overlap simulated grid -> hard penalty
+                if logger:
+                    logger.warn(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
+                return float(penalty_if_fail)
 
-        obj = float(-(rl_f0) - bandwidth_bonus)
+            # Linear reflection in band
+            gam_band = _gamma_from_rl_db(rl[m])
+            # Target in linear
+            rl_target = abs(float(bandwidth_target_db))
+            gam_target = 10.0**(-rl_target/20.0)
 
-        improved = obj < state["best_obj"]
-        if improved or log_every_eval:
-            base_msg = f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB"
-            if frac_ok is None:
-                logger.info(f"{base_msg}, objective={obj:.4f}" + ("  [NEW BEST]" if improved else ""))
-            else:
+            # Excess over target (0 if meeting target)
+            excess = np.clip(gam_band - gam_target, 0.0, None)
+
+            # Use trapezoidal integral normalized by band width (handles non-uniform grids)
+            band_width = f_hi - f_lo
+            # Numerical safety
+            if band_width <= 0:
+                return float(penalty_if_fail)
+
+            # Mean excess via integral
+            mean_excess = float(np.trapz(excess, freq[m]) / band_width)
+
+            # Robustness: small worst-case term to kill narrow spikes
+            alpha = 0.2  # tune 0.1–0.3 if needed
+            max_excess = float(np.max(excess))
+
+            # Optional center weighting (very light)
+            beta = 0.1  # set 0.0 to disable
+            ex0 = float(max(_gamma_from_rl_db(np.array([rl_f0]))[0] - gam_target, 0.0))
+
+            obj = mean_excess + alpha * max_excess + beta * ex0
+
+            # Logging aids
+            frac_ok = float(np.mean(rl[m] >= rl_target))
+            rl_min_band = float(np.min(rl[m]))
+            if log_every_eval or obj < state["best_obj"]:
                 logger.info(
-                    f"{base_msg}, BW_frac≥{abs(bandwidth_target_db):.1f}dB={frac_ok:.3f}, objective={obj:.4f}"
-                    + ("  [NEW BEST]" if improved else "")
+                    f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, "
+                    f"band[{f_lo/1e9:.3f}-{f_hi/1e9:.3f} GHz]: "
+                    f"minRL={rl_min_band:.2f} dB, frac≥{rl_target:.0f}dB={frac_ok:.3f}, "
+                    f"obj={obj:.6f}"
+                    + ("  [NEW BEST]" if obj < state["best_obj"] else "")
+                )
+        else:
+            # Fallback: minimize |Γ| at f0 (single-point)
+            gam_f0 = float(_gamma_from_rl_db(np.array([rl_f0]))[0])
+            obj = gam_f0
+            if log_every_eval or obj < state["best_obj"]:
+                logger.info(
+                    f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, obj(|Γ(f0)|)={obj:.6f}"
+                    + ("  [NEW BEST]" if obj < state["best_obj"] else "")
                 )
 
+        # Track best & persist
+        improved = obj < state["best_obj"]
         if improved:
             state["best_obj"] = obj
             state["best_rl"]  = rl_f0
             logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_raw(params))
-            #make new folder if not exists
             os.makedirs("best_params_logs", exist_ok=True)
             with open(f"best_params_logs/{stage_name}.log","a",encoding="utf-8") as f:
-                f.write(f"{state['evals']},{rl_f0:.3f},{obj:.6f}," + _fmt_params_singleline_raw(params) + "\n")
+                f.write(f"{state['evals']},{rl_f0:.3f},{obj:.9f}," + _fmt_params_singleline_raw(params) + "\n")
 
         return obj
 
@@ -504,8 +545,8 @@ def append_trace(csv_path: str, stage: str, evals: int, best_rl: float, obj: flo
 def run_stage(stage_name: str, params: dict, opt_bounds: Dict[str, Tuple[float, float]],
               *, maxiter: int, popsize: int, seed: int,
               solver_name: str, timeout: float,
-              bandwidth_target_db: float, bandwidth_span, bandwidth_weight: float,
-              include_start: bool, start_jitter: float, log_every_eval: bool):
+              bandwidth_target_db: float, bandwidth_span,
+              include_start: bool, log_every_eval: bool):
     print(f"\n=== Stage: {stage_name} ===")
     best_params, result, summary = optimize_ifa(
         start_parameters=params,
@@ -518,9 +559,7 @@ def run_stage(stage_name: str, params: dict, opt_bounds: Dict[str, Tuple[float, 
         timeout=timeout,
         bandwidth_target_db=bandwidth_target_db,
         bandwidth_span=bandwidth_span,
-        bandwidth_weight=bandwidth_weight,
         include_start=include_start,
-        start_jitter=start_jitter,
         log_every_eval=log_every_eval,
         stage_name=stage_name
     )
@@ -546,11 +585,9 @@ def optimize_ifa(
     log_every_eval: bool = False,      # set True if you want every evaluation logged
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
-    bandwidth_weight: float = 0.0,
     solver_name: str = "CUDSS",
     timeout: float = 600.0,
     include_start: bool = False,        # NEW: ensure start point is evaluated
-    start_jitter: float = 0.05,         # NEW: fraction of bound span for Gaussian jitter
     stage_name: str = "default"
 ):
     logger = OptLogger(enabled=True)
@@ -566,7 +603,7 @@ def optimize_ifa(
     objective, var_keys = _objective_factory(
     start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
     bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
-    bandwidth_weight=bandwidth_weight, solver_name=solver_name, timeout=timeout,
+    solver_name=solver_name, timeout=timeout,
     maxiter_hint=maxiter, popsize_hint=popsize, stage_name=stage_name
     )
     bounds_list = [bounds_m[k] for k in var_keys]
