@@ -442,9 +442,6 @@ def _objective_factory(
                 if logger:
                     logger.warn(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
                 return float(penalty_if_fail)
-            print(f"freq: {freq}")
-            print(f"rl: {rl}")
-            print(f"m: {m}")
             # Linear reflection in band
             gam_band = _gamma_from_rl_db(rl[m])
             # Target in linear
