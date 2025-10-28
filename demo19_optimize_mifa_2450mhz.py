@@ -65,13 +65,13 @@ calc_wavelength_at_2_45ghz = (3e8 / 2.45e9)*epsilon_r**0.5
 # IMPORTANT: set bounds in METERS
 BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
     'ifa_h':  (3.0*mm, 10.0*mm),
-    'ifa_l':  (15*mm,   25*mm),
+    'ifa_l':  (18*mm,   35*mm),
     'ifa_w1': (0.3*mm,  1.5*mm),
     'ifa_w2': (0.3*mm,  1*mm),
     'ifa_wf': (0.3*mm,  1*mm),
     'ifa_fp': (0.6*mm,  6*mm),
     'mifa_meander_edge_distance': (0.5*mm, 4*mm),
-    "mifa_meander": (0.6*mm, 3*mm),
+    "mifa_meander": (0.6*mm, 2*mm),
 }
 
 
