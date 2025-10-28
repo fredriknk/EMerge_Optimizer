@@ -36,7 +36,7 @@ Note: ifa_l is total length including meanders and tip
 """
 
 parameters = { 
-    'ifa_h': 1.0*mm,
+    'ifa_h': 6.0*mm,
     'ifa_l': 20*mm,
     'ifa_w1': 0.5*mm,
     'ifa_w2': 0.5*mm,
@@ -64,7 +64,7 @@ epsilon_r = 4.4  # FR4 typical
 calc_wavelength_at_2_45ghz = (3e8 / 2.45e9)*epsilon_r**0.5
 # IMPORTANT: set bounds in METERS
 BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
-    'ifa_h':  (3.0*mm, 10.0*mm),
+    'ifa_h':  (3.0*mm, 7.0*mm),
     'ifa_l':  (18*mm,   35*mm),
     'ifa_w1': (0.3*mm,  1.5*mm),
     'ifa_w2': (0.3*mm,  1*mm),
@@ -95,14 +95,14 @@ def main():
     run_stage(
         f"{SIMULATION_NAME}_quick",
         p, bounds,
-        maxiter=4, popsize=30, seed=1,
+        maxiter=2, popsize=50, seed=1,
         solver_name=SOLVER, timeout=120.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
         include_start=False, log_every_eval=True
     )
 
     # ----------------- Stage 1: Refine (narrow bounds, better mesh) --------------
-    bounds = shrink_bounds_around_best(p, bounds, shrink=0.35, min_span_mm=0.05)
+    bounds = shrink_bounds_around_best(p, bounds, shrink=0.30, min_span_mm=0.05)
     p['freq_points'] = 3
     p['lambda_scale'] = 0.7
     p['mesh_wavelength_fraction'] = 0.30
@@ -114,7 +114,7 @@ def main():
         maxiter=8, popsize=6, seed=2,
         solver_name=SOLVER, timeout=170.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=False, log_every_eval=False
+        include_start=True, log_every_eval=False
     )
 
     # ----------------- Stage 2: Refine deeper (tight bounds, denser sweep) -------
@@ -130,7 +130,7 @@ def main():
         maxiter=10, popsize=4, seed=3,
         solver_name=SOLVER, timeout=200.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=False, log_every_eval=False
+        include_start=True, log_every_eval=False
     )
 
     # Done: save final winner, print compact line again
