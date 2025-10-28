@@ -469,8 +469,8 @@ def _objective_factory(
             # Optional center weighting (very light)
             beta = 0.1  # set 0.0 to disable
             ex0 = float(max(_gamma_from_rl_db(np.array([rl_f0]))[0] - gam_target, 0.0))
-
-            obj = -1*(rl_f0+rl_f0*frac_ok)
+            fracobj = frac_ok if frac_ok is not None else 0.0
+            obj = -1*(rl_f0+rl_f0*fracobj)
 
             # Logging aids
             frac_ok = float(np.mean(rl[m] >= rl_target))
