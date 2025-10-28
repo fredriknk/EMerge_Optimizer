@@ -462,15 +462,15 @@ def _objective_factory(
             # Robustness: small worst-case term to kill narrow spikes
             alpha = 0.2  # tune 0.1–0.3 if needed
             max_excess = float(np.max(excess))
-
+            
             # Optional center weighting (very light)
             beta = 0.1  # set 0.0 to disable
             ex0 = float(max(_gamma_from_rl_db(np.array([rl_f0]))[0] - gam_target, 0.0))
-            fracobj = frac_ok if frac_ok is not None else 0.0
-            obj = -1*(rl_f0+rl_f0*fracobj)
-
-            # Logging aids
+            
             frac_ok = float(np.mean(rl[m] >= rl_target))
+            print(f"frac_ok debug: rl_f0={rl_f0:.2f} dB, frac_ok={frac_ok:.2f}")
+            obj = -1*(rl_f0+rl_f0*frac_ok)
+
             rl_min_band = float(np.min(rl[m]))
             if log_every_eval or obj < state["best_obj"]:
                 logger.info(
