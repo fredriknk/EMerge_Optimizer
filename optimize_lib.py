@@ -470,7 +470,7 @@ def _objective_factory(
             beta = 0.1  # set 0.0 to disable
             ex0 = float(max(_gamma_from_rl_db(np.array([rl_f0]))[0] - gam_target, 0.0))
 
-            obj = -1*(rl_f0+rl_f0*rl_target)
+            obj = -1*(rl_f0+rl_f0*frac_ok)
 
             # Logging aids
             frac_ok = float(np.mean(rl[m] >= rl_target))
