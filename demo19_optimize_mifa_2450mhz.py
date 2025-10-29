@@ -65,12 +65,12 @@ calc_wavelength_at_2_45ghz = (3e8 / 2.45e9)*epsilon_r**0.5
 # IMPORTANT: set bounds in METERS
 BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
     'ifa_h':  (3.0*mm, 7.0*mm),
-    'ifa_l':  (18*mm,   35*mm),
+    'ifa_l':  (15*mm,   35*mm),
     'ifa_w1': (0.3*mm,  1.5*mm),
     'ifa_w2': (0.3*mm,  1*mm),
     'ifa_wf': (0.3*mm,  1*mm),
     'ifa_fp': (0.6*mm,  6*mm),
-    'mifa_meander_edge_distance': (0.5*mm, 4*mm),
+    'mifa_meander_edge_distance': (0.5*mm, 5*mm),
     "mifa_meander": (0.6*mm, 2*mm),
 }
 
@@ -95,7 +95,7 @@ def main():
     run_stage(
         f"{SIMULATION_NAME}_quick",
         p, bounds,
-        maxiter=2, popsize=50, seed=1,
+        maxiter=5, popsize=50, seed=1,
         solver_name=SOLVER, timeout=120.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
         include_start=False, log_every_eval=True
@@ -114,7 +114,7 @@ def main():
         maxiter=8, popsize=6, seed=2,
         solver_name=SOLVER, timeout=170.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=True, log_every_eval=False
+        include_start=False, log_every_eval=False
     )
 
     # ----------------- Stage 2: Refine deeper (tight bounds, denser sweep) -------
@@ -130,7 +130,7 @@ def main():
         maxiter=10, popsize=4, seed=3,
         solver_name=SOLVER, timeout=200.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=True, log_every_eval=False
+        include_start=False, log_every_eval=False
     )
 
     # Done: save final winner, print compact line again
