@@ -436,17 +436,12 @@ def _objective_factory(
 
         # Use *positive* RL for all math:
         rl_pos = np.abs(rl_db)  
-
-        # === Multi-frequency, bandwidth-oriented objective in linear |Γ| ===
-        # Helpers
-        def _gamma_from_rl_db(rl_db_arr: np.ndarray) -> np.ndarray:
-            # RL = -20*log10|Γ|  ->  |Γ| = 10^(-RL/20)
-            # clip to <=0 dB to avoid >1 gamma from weird inputs
-            return 10.0**(-np.clip(rl_db_arr, -1e6, 0.0)/20.0)
-        
         def _gamma_from_rl_pos_db(rl_pos_db_arr: np.ndarray) -> np.ndarray:
-            # RL_pos_dB = -20 log10|Γ|  ->  |Γ| = 10^(-RL_pos/20), always ≤ 1
-            return 10.0 ** (-rl_pos_db_arr / 20.0)
+            # RL_pos_dB = -20*log10|Γ|  -> |Γ| = 10^(-RL_pos/20)  (always ≤ 1)
+            return 10.0 ** (-np.asarray(rl_pos_db_arr, dtype=float) / 20.0)
+        def _gamma_from_rl_db(rl_db_arr: np.ndarray) -> np.ndarray:
+            # RL_dB = -20*log10|Γ|  -> |Γ| = 10^(-(-RL)/20) = 10^(RL/20)
+            return 10.0 ** (np.asarray(rl_db_arr, dtype=float) / 20.0)
 
         # Interpolate RL at f0 for logging and (optional) center penalty
         f0 = float(params['f0'])
@@ -467,20 +462,18 @@ def _objective_factory(
                 if logger:
                     logger.warning(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
                 return float(penalty_if_fail)
-            rl_pos = np.abs(rl_db)
 
-            def _gamma_from_rl_pos_db(rl_pos_db_arr: np.ndarray) -> np.ndarray:
-                # RL_pos_dB = -20*log10|Γ|  -> |Γ| = 10^(-RL_pos/20)  (always ≤ 1)
-                return 10.0 ** (-np.asarray(rl_pos_db_arr, dtype=float) / 20.0)
-            # Linear reflection in band
-            gam_band = _gamma_from_rl_pos_db(rl_pos[m])
+            # Linear reflection (|Γ|) in-band
+            gamma  = _gamma_from_rl_pos_db(rl_pos[m])          # |Γ|
+            gamma2 = gamma * gamma                              # |Γ|^2 (power)
 
             # Target in linear (e.g., target -10 dB -> |Γ|_t = 0.316)
-            rl_target = abs(float(bandwidth_target_db))      # e.g. 10 for -10 dB
-            gam_target = 10.0 ** (-rl_target / 20.0)
+            rl_target = abs(float(bandwidth_target_db))         # e.g. 10 for -10 dB
+            g_t  = 10.0 ** (-rl_target / 20.0)                  # |Γ| target
+            g2_t = g_t * g_t                                    # power target
 
             # Excess above target (≥ 0)
-            excess = np.clip(gam_band - gam_target, 0.0, None)
+            excess = np.clip(gamma - g_t, 0.0, None)
 
             # Trapezoidal mean excess normalized by band width (handles non-uniform freq grids)
             band_width = float(f_hi - f_lo)
@@ -494,21 +487,25 @@ def _objective_factory(
             max_excess = float(np.max(excess))
 
             # Optional center weighting (very light)
-            beta = 0.1   # set 0.0 to disable
-            ex0 = float(max(_gamma_from_rl_pos_db([abs(rl_f0)])[0] - gam_target, 0.0))
+            beta = 0.2   # set 0.0 to disable
+            ex0 = float(max(_gamma_from_rl_pos_db([abs(rl_f0)])[0] - g_t, 0.0))
 
-            # Final penalty (≥ 0); lower is better
-            obj = mean_excess + alpha * max_excess + beta * ex0
+            # Gentle preference for deeper-than-target match (smaller |Γ|^2)
+            mean_power = float(np.trapz(gamma2, freq[m]) / band_width)   # average |Γ|^2 over band
+            eta = 0.1  # small weight; tune ~0.01–0.1
+
+            obj = mean_excess + alpha * max_excess + beta * ex0 + eta * (mean_power / g2_t)  # minimize
 
             # Logging aids (meeting spec means RL[dB] <= -rl_target)
             rl_spec_db = -rl_target
             frac_ok = float(np.mean(rl_db[m] <= rl_spec_db))
             rl_min_band = float(np.min(rl_db[m]))
+            rl_frequency_band = freq[m][np.argmin(rl_db[m])]
             if log_every_eval or obj < state["best_obj"]:
                 logger.info(
                     f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, "
                     f"band[{f_lo/1e9:.3f}-{f_hi/1e9:.3f} GHz]: "
-                    f"minRL={rl_min_band:.2f} dB, frac≥{rl_target:.0f}dB={frac_ok:.3f}, "
+                    f"minRL={rl_min_band:.2f} dB, resonant_freq={rl_frequency_band/1e9:.3f} GHz, frac≥{rl_target:.0f}dB={frac_ok:.3f}, "
                     f"obj={obj:.6f}"
                     + ("  [NEW BEST]" if obj < state["best_obj"] else "")
                 )
