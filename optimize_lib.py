@@ -386,8 +386,10 @@ def _objective_factory(
         ok_params, errs = _is_valid_params(params)
         if not ok_params:
             if logger:
-                logger.warn(f"[eval {state['evals']:04d}] infeasible params -> penalty; reasons: {', '.join(errs[:3])}"
-                            + ("..." if len(errs) > 3 else ""))
+                logger.warn(
+                    f"[eval {state['evals']:04d}] infeasible params -> penalty; reasons: {', '.join(errs[:3])}"
+                    + ("..." if len(errs) > 3 else "")
+                )
             return float(penalty_if_fail)
         
         ok, payload = _safe_sim_rl_multi(
@@ -409,24 +411,40 @@ def _objective_factory(
             state["avg_eval_s"] = 0.8 * state["avg_eval_s"] + 0.2 * dt  # EMA smoothing
             
         if not ok:
-            logger.warn(f"[eval {state['evals']:04d}] simulation failed ({payload}); applying penalty {penalty_if_fail:g}")
+            logger.warning(f"[eval {state['evals']:04d}] simulation failed ({payload}); applying penalty {penalty_if_fail:g}")
             return float(penalty_if_fail)
 
-        freq_list, rl_list = payload
-        # Convert to numpy for convenience
-        freq = np.array(freq_list, dtype=float)
-        rl   = np.array(rl_list, dtype=float)
+        # --- Normalize payload to RL[dB] no matter what the simulator returned ---
+        freq_list, y_list = payload
+
+        def _as_rl_db(y: np.ndarray) -> np.ndarray:
+            """y can be RL[dB] (negative), |S11| (0..1), or complex S11."""
+            y = np.asarray(y)
+            if np.iscomplexobj(y):
+                mag = np.abs(y)
+                return -20.0 * np.log10(np.clip(mag, 1e-12, 1.0))
+            y = y.astype(float)
+            if np.nanmax(y) <= 1.0 and np.nanmin(y) >= 0.0:
+                # Looks like |S11| magnitude
+                return -20.0 * np.log10(np.clip(y, 1e-12, 1.0))
+            # Assume already RL in dB; force negative convention
+            return -np.abs(y)
+
+        # Numpy-ize
+        freq   = np.array(freq_list, dtype=float)
+        rl_db  = _as_rl_db(np.array(y_list))
 
         # === Multi-frequency, bandwidth-oriented objective in linear |Γ| ===
         # Helpers
         def _gamma_from_rl_db(rl_db_arr: np.ndarray) -> np.ndarray:
             # RL = -20*log10|Γ|  ->  |Γ| = 10^(-RL/20)
-            return 10.0**(-rl_db_arr/20.0)
+            # clip to <=0 dB to avoid >1 gamma from weird inputs
+            return 10.0**(-np.clip(rl_db_arr, -1e6, 0.0)/20.0)
 
         # Interpolate RL at f0 for logging and (optional) center penalty
         f0 = float(params['f0'])
         f0_clamped = min(max(f0, freq.min()), freq.max())
-        rl_f0 = float(np.interp(f0_clamped, freq, rl))
+        rl_f0 = float(np.interp(f0_clamped, freq, rl_db))
 
         # If we have a target and span -> optimize bandwidth (band-integrated excess |Γ|)
         use_band = (bandwidth_target_db is not None) and (bandwidth_span is not None)
@@ -440,13 +458,13 @@ def _objective_factory(
             if not np.any(m):
                 # Band does not overlap simulated grid -> hard penalty
                 if logger:
-                    logger.warn(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
+                    logger.warning(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
                 return float(penalty_if_fail)
 
             # Linear reflection in band
-            gam_band = _gamma_from_rl_db(rl[m])
+            gam_band = _gamma_from_rl_db(rl_db[m])
             # Target in linear
-            rl_target = abs(float(bandwidth_target_db))
+            rl_target = abs(float(bandwidth_target_db))   # e.g. 10 for -10 dB
             gam_target = 10.0**(-rl_target/20.0)
 
             # Excess over target (0 if meeting target)
@@ -471,9 +489,10 @@ def _objective_factory(
 
             obj = mean_excess + alpha * max_excess + beta * ex0
 
-            # Logging aids
-            frac_ok = float(np.mean(rl[m] >= rl_target))
-            rl_min_band = float(np.min(rl[m]))
+            # Logging aids (meeting spec means RL[dB] <= -rl_target)
+            rl_spec_db = -rl_target
+            frac_ok = float(np.mean(rl_db[m] <= rl_spec_db))
+            rl_min_band = float(np.min(rl_db[m]))
             if log_every_eval or obj < state["best_obj"]:
                 logger.info(
                     f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, "
@@ -503,6 +522,7 @@ def _objective_factory(
                 f.write(f"{state['evals']},{rl_f0:.3f},{obj:.9f}," + _fmt_params_singleline_raw(params) + "\n")
 
         return obj
+
 
     return _objective, var_keys
 
