@@ -442,6 +442,7 @@ def _objective_factory(
                 if logger:
                     logger.warn(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
                 return float(penalty_if_fail)
+
             # Linear reflection in band
             gam_band = _gamma_from_rl_db(rl[m])
             # Target in linear
@@ -458,18 +459,20 @@ def _objective_factory(
                 return float(penalty_if_fail)
 
             # Mean excess via integral
-            mean_excess = float(np.trapezoid(excess, freq[m]) / band_width)
+            mean_excess = float(np.trapz(excess, freq[m]) / band_width)
+
             # Robustness: small worst-case term to kill narrow spikes
             alpha = 0.2  # tune 0.1–0.3 if needed
             max_excess = float(np.max(excess))
-            
+
             # Optional center weighting (very light)
             beta = 0.1  # set 0.0 to disable
             ex0 = float(max(_gamma_from_rl_db(np.array([rl_f0]))[0] - gam_target, 0.0))
-            
-            frac_ok = float(np.mean(rl[m] >= rl_target))
-            obj = -1*(rl_f0+rl_f0*frac_ok)
 
+            obj = mean_excess + alpha * max_excess + beta * ex0
+
+            # Logging aids
+            frac_ok = float(np.mean(rl[m] >= rl_target))
             rl_min_band = float(np.min(rl[m]))
             if log_every_eval or obj < state["best_obj"]:
                 logger.info(

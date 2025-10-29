@@ -63,12 +63,12 @@ def validate_ifa_params(p):
         if val <= 0:
             errors.append(f"{name} must be > 0 (got {val}).")
 
-    if freq_points < 2:
-        errors.append(f"freq_points must be >= 2 (got {freq_points}).")
+    if freq_points < 1:
+        errors.append(f"freq_points must be >= 1 (got {freq_points}).")
 
     # Frequency ordering
-    if not (f1 < f0 < f2):
-        errors.append(f"Frequency ordering must be f1 < f0 < f2 (got f1={f1}, f0={f0}, f2={f2}).")
+    if not (f1 <= f0 <= f2):
+        errors.append(f"Frequency ordering must be f1 <= f0 <= f2 (got f1={f1}, f0={f0}, f2={f2}).")
 
     # Mesh sanity bounds
     if not (0.05 <= mesh_wavelength_fraction <= 1.0):
