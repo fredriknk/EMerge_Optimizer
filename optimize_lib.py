@@ -746,3 +746,130 @@ def optimize_ifa(
         "optimizer_fun": float(result.fun),
     }
     return best_params, result, summary
+
+def local_pattern_search_ifa(
+    start_parameters: Dict[str, float],
+    optimize_parameters: Dict[str, Tuple[float, float]],
+    *,
+    init_step_frac: float = 0.10,         # initial step = 10% of each variable span
+    min_step_mm: float = 0.02,            # stop when all steps < 0.02 mm
+    shrink: float = 0.5,                   # shrink factor when no improvement
+    max_rounds: int = 50,                  # safety cap on shrink rounds
+    bandwidth_target_db: Optional[float] = None,
+    bandwidth_span: Optional[Tuple[float, float]] = None,
+    solver_name: str = "PARDISO",
+    timeout: float = 600.0,
+    log_every_eval: bool = False,
+    stage_name: str = "local"
+):
+    """
+    Bounded coordinate/pattern search:
+    - Starts from 'start_parameters' (clamped to bounds).
+    - On each round, tries +/- step along each variable (one-at-a-time).
+    - Accepts the first improving move; otherwise shrinks steps.
+    - Terminates when all steps < min_step_mm or max_rounds reached.
+    """
+    logger = OptLogger(enabled=True)
+    mm = 1e-3
+
+    bounds_m = _ensure_bounds_in_meters(optimize_parameters)
+    var_keys = list(bounds_m.keys())
+
+    # Build objective
+    objective, _ = _objective_factory(
+        start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
+        bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
+        solver_name=solver_name, timeout=timeout,
+        maxiter_hint=None, popsize_hint=None, stage_name=stage_name
+    )
+
+    # Current point = clamped start
+    x = np.array([np.clip(start_parameters[k], *bounds_m[k]) for k in var_keys], dtype=float)
+
+    # Initialize step sizes per-dimension as a fraction of span
+    spans = np.array([bounds_m[k][1] - bounds_m[k][0] for k in var_keys], dtype=float)
+    steps = np.maximum(init_step_frac * spans, 1e-6)  # meters
+
+    def eval_obj(vec: np.ndarray) -> float:
+        p = _pack_params(start_parameters, var_keys, vec)
+        ok, _errs = _is_valid_params(p)
+        if not ok:
+            return 1e6  # let the existing objective penalize too, but short-circuit here
+        return float(objective(vec))
+
+    # Evaluate start
+    f_best = eval_obj(x)
+    logger.info(f"[{stage_name}] start obj={f_best:.6f}")
+
+    rounds = 0
+    while rounds < max_rounds:
+        improved = False
+        rounds += 1
+
+        # Sweep each coordinate with +/- step (first improvement strategy)
+        for i, k in enumerate(var_keys):
+            if steps[i] < (min_step_mm * mm):
+                continue
+
+            lo, hi = bounds_m[k]
+
+            for direction in (+1.0, -1.0):
+                cand = x.copy()
+                cand[i] = np.clip(cand[i] + direction * steps[i], lo, hi)
+
+                # Skip if change is numerically negligible
+                if abs(cand[i] - x[i]) < 1e-12:
+                    continue
+
+                f_cand = eval_obj(cand)
+                if f_cand + 0.0 < f_best:   # strict improvement
+                    x, f_best = cand, f_cand
+                    logger.info(f"[{stage_name}] improve: {k} -> {x[i]/mm:.3f} mm, obj={f_best:.6f}")
+                    improved = True
+                    # Pattern move: try to keep going one more step in same direction
+                    cand2 = x.copy()
+                    cand2[i] = np.clip(cand2[i] + direction * steps[i], lo, hi)
+                    f_cand2 = eval_obj(cand2)
+                    if f_cand2 + 0.0 < f_best:
+                        x, f_best = cand2, f_cand2
+                        logger.info(f"[{stage_name}] pattern: {k} -> {x[i]/mm:.3f} mm, obj={f_best:.6f}")
+                    break  # move to next dimension
+            # end for direction
+        # end for each dimension
+
+        if not improved:
+            # No improvement this round: shrink steps
+            steps *= shrink
+            logger.info(
+                f"[{stage_name}] no improvement, shrinking steps; "
+                f"max_step={steps.max()/mm:.3f} mm, min_step={steps.min()/mm:.3f} mm"
+            )
+            # Stopping criterion
+            if np.all(steps < (min_step_mm * mm)):
+                logger.info(f"[{stage_name}] stop: all steps < {min_step_mm} mm")
+                break
+
+    best_params = _pack_params(start_parameters, var_keys, x)
+
+    # Final verification run (matches optimize_ifa’s epilogue)
+    from ifalib import build_mifa, get_loss_at_freq
+    import emerge as em
+    solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
+    model, S11, freq_dense, *_ = build_mifa(
+        best_params, view_model=False, run_simulation=True, compute_farfield=False, solver=solver_enum
+    )
+    rl_best = get_loss_at_freq(S11, best_params['f0'], freq_dense)
+
+    logger.info(f"[{stage_name}] FINAL RL@f0 = {rl_best:.2f} dB")
+    for k in var_keys:
+        logger.info(f"  {k:>24s} = {best_params[k]/mm:.3f} mm")
+
+    summary = {
+        "best_return_loss_dB_at_f0": float(rl_best),
+        "best_params": {k: float(best_params[k]) for k in best_params},
+        "optimizer_nfev": None,          # not from SciPy; could count in objective state if desired
+        "optimizer_success": True,
+        "optimizer_fun": float(f_best),
+        "rounds": int(rounds),
+    }
+    return best_params, summary

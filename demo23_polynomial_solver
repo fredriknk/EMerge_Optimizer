@@ -107,8 +107,8 @@ def optimize_mifa_poly(
     keys_to_tune: list,
     *,
     max_iters=60,
-    init_samples= None,           # default: 2d + 4
-    per_iter_samples= None,       # default: d//2 + 1
+    init_samples=None,           # default: 2d + 4
+    per_iter_samples=None,       # default: d//2 + 1
     trust_frac=0.10,
     ridge_model=1e-4,
     ridge_solve=1e-6,
@@ -126,67 +126,128 @@ def optimize_mifa_poly(
     lo = np.array([bounds[k][0] for k in order], float)
     hi = np.array([bounds[k][1] for k in order], float)
     span = hi - lo
-    x = np.array([p0[k] for k in order], float)          # current point in param subspace
-    trust = trust_frac * np.maximum(span, 1e-12)
+    mid  = (hi + lo) / 2.0
+
+    # --- represent params in normalized coords: x_n in [-0.5, +0.5] range roughly
+    def to_norm(x_abs):   return (x_abs - mid) / np.where(span!=0, span, 1.0)
+    def from_norm(x_norm): return np.clip(mid + x_norm*span, lo, hi)
+
+    x_abs = np.array([p0[k] for k in order], float)
+    x = to_norm(x_abs)                         # normalized working point
+    trust = trust_frac * np.ones(d)           # trust in *normalized* units
 
     if init_samples is None: init_samples = 2*d + 4
     if per_iter_samples is None: per_iter_samples = max(d//2 + 1, 1)
 
-    # dataset
+    # data containers in normalized space
     Xd = []
     Yr_fr, Yr_R, Yr_X = [], [], []
 
-    def pack_params(xvec):
+    def pack_params_from_norm(xn):
         pd = dict(p0)
-        for k, v in zip(order, xvec):
+        for k, v in zip(order, from_norm(xn)):
             pd[k] = float(v)
         return pd
 
-    def eval_and_store(xvec):
-        pd = pack_params(xvec)
+    def eval_and_store(xn):
+        pd = pack_params_from_norm(xn)
         feat = eval_impedance_features(pd)
         if feat is None:
             return None
-        Xd.append(xvec.copy())
+        Xd.append(xn.copy())
         Yr_fr.append(feat['fr'])
         Yr_R.append(feat['R0'])
         Yr_X.append(feat['X0'])
         return feat
 
-    # seed: include center + random within trust
-    feat = eval_and_store(x)
-    if feat is None:
+    # seed center + random around it
+    feat0 = eval_and_store(x)
+    if feat0 is None:
         raise RuntimeError("Initial simulation failed.")
     f0 = p0['f0']
 
     for _ in range(init_samples):
         u = rng.uniform(-1, 1, size=d)
-        cand = np.clip(x + u*trust, lo, hi)
+        cand = np.clip(x + u*trust, -0.6, +0.6)     # keep within bounds (normalized)
         eval_and_store(cand)
 
-    # Standardization for surrogate
+    # standardization for surrogate (on normalized X)
     Xmat = np.array(Xd)
     x_mean = np.mean(Xmat, axis=0)
-    x_scale = np.std(Xmat, axis=0) + 1e-12
+    x_std  = np.std(Xmat, axis=0) + 1e-12
+
+    class QuadRidge:
+        def __init__(self, dim, ridge=1e-4, x_mean=None, x_std=None):
+            self.d = dim; self.ridge = ridge
+            self.x_mean = np.zeros(dim) if x_mean is None else np.array(x_mean, float)
+            self.x_std  = np.ones(dim)  if x_std  is None else np.array(x_std,  float)
+            self.coef = None
+            self.quad_pairs = [(i,j) for i in range(dim) for j in range(i,dim)]
+
+        def _std(self, X):
+            return (X - self.x_mean) / self.x_std
+
+        def _Phi(self, Xs):
+            n = Xs.shape[0]
+            m = 1 + self.d + len(self.quad_pairs)
+            Phi = np.empty((n, m), float)
+            Phi[:,0] = 1.0
+            Phi[:,1:1+self.d] = Xs
+            k = 1 + self.d
+            for (i,j) in self.quad_pairs:
+                Phi[:,k] = Xs[:,i]*Xs[:,j]; k += 1
+            return Phi
+
+        def fit(self, X, y):
+            Xs = self._std(np.atleast_2d(X).astype(float))
+            Phi = self._Phi(Xs)
+            PtP = Phi.T @ Phi
+            w = np.linalg.solve(PtP + self.ridge*np.eye(PtP.shape[0]),
+                                Phi.T @ np.asarray(y, float).reshape(-1))
+            self.coef = w
+            return self
+
+        def predict(self, X):
+            Xs = self._std(np.atleast_2d(X).astype(float))
+            return (self._Phi(Xs) @ self.coef).reshape(-1)
+
+        def grad(self, x):
+            x  = np.asarray(x, float).reshape(-1)
+            xs = (x - self.x_mean) / self.x_std
+            w = self.coef
+            a = w[1:1+self.d].copy()
+            # build symmetric B
+            B = np.zeros((self.d, self.d))
+            k = 1 + self.d
+            for (i,j) in self.quad_pairs:
+                B[i,j] = w[k]
+                if i != j: B[j,i] = w[k]
+                k += 1
+            g_xs = a + (B + B.T) @ xs
+            return g_xs / self.x_std   # chain rule
 
     # CSV
+    csv_fh = None
     csv_writer = None
     if csv_log_path:
-        fcsv = open(csv_log_path, "w", newline="", encoding="utf-8")
-        csv_writer = csv.writer(fcsv)
+        csv_fh = open(csv_log_path, "w", newline="", encoding="utf-8")
+        csv_writer = csv.writer(csv_fh)
         csv_writer.writerow(["iter","fr_GHz","R_ohm","X_ohm","score", *[f"p:{k}" for k in order]])
 
-    for it in range(1, max_iters+1):
-        # fit surrogate models
-        fr_model = QuadRidge(d, ridge=ridge_model, x_mean=x_mean, x_scale=x_scale).fit(Xd, Yr_fr)
-        R_model  = QuadRidge(d, ridge=ridge_model, x_mean=x_mean, x_scale=x_scale).fit(Xd, Yr_R)
-        X_model  = QuadRidge(d, ridge=ridge_model, x_mean=x_mean, x_scale=x_scale).fit(Xd, Yr_X)
+    # --- scales to fix conditioning in the solve (key change) ---
+    fr_scale = 10e6   # 10 MHz
+    R_scale  = 10.0
+    X_scale  = 10.0
 
-        # current measurements (no new sim yet)
-        pd_cur = pack_params(x)
-        feat_cur = eval_impedance_features(pd_cur)
+    for it in range(1, max_iters+1):
+        # fit surrogates in normalized param space
+        fr_m = QuadRidge(d, ridge=ridge_model, x_mean=x_mean, x_std=x_std).fit(Xd, Yr_fr)
+        R_m  = QuadRidge(d, ridge=ridge_model, x_mean=x_mean, x_std=x_std).fit(Xd, Yr_R)
+        X_m  = QuadRidge(d, ridge=ridge_model, x_mean=x_mean, x_std=x_std).fit(Xd, Yr_X)
+
+        # current true features
+        feat_cur = eval_impedance_features(pack_params_from_norm(x))
         if feat_cur is None:
-            # contract trust and skip
             trust *= 0.6
             continue
 
@@ -203,14 +264,25 @@ def optimize_mifa_poly(
             print(f"[it {it}] fr={fr/1e9:.4f} GHz  @f0: R={R0:.2f}Ω X={X0:.2f}Ω  "
                   f"targets: Δfr={err_fr/1e6:.2f} MHz, ΔR={err_R:.2f}, ΔX={err_X:.2f}  (phase {phase})")
 
-        # surrogate Jacobian at x
-        J_fr = fr_model.grad(x)
-        J_R  = R_model.grad(x)
-        J_X  = X_model.grad(x)
+        # surrogate Jacobian (in normalized param space)
+        J_fr = fr_m.grad(x)
+        J_R  =  R_m.grad(x)
+        J_X  =  X_m.grad(x)
 
-        # stack and solve for Δx
-        A = np.vstack([J_fr, wR_eff*J_R, wX_eff*J_X])
-        b = np.array([err_fr, wR_eff*err_R, wX_eff*err_X], float)
+        # guard: if all rows are tiny, add exploration and continue
+        row_norms = np.array([np.linalg.norm(J_fr), np.linalg.norm(J_R), np.linalg.norm(J_X)])
+        if np.all(row_norms < 1e-10):
+            trust = np.minimum(trust*1.4, 0.6)
+            for _ in range(max(per_iter_samples, d)):
+                u = rng.uniform(-1, 1, size=d)
+                eval_and_store(np.clip(x + u*trust, -0.6, +0.6))
+            Xmat = np.array(Xd); x_mean = Xmat.mean(0); x_std = Xmat.std(0)+1e-12
+            if verbose: print("  Jacobian tiny → exploring & expanding dataset.\n")
+            continue
+
+        # --- scaled system (key change) ---
+        A = np.vstack([J_fr/fr_scale, wR_eff*J_R/R_scale, wX_eff*J_X/X_scale])
+        b = np.array([err_fr/fr_scale, wR_eff*err_R/R_scale, wX_eff*err_X/X_scale], float)
 
         H = A.T @ A + ridge_solve*np.eye(d)
         g = A.T @ b
@@ -219,21 +291,35 @@ def optimize_mifa_poly(
         except np.linalg.LinAlgError:
             dx = np.zeros(d)
 
-        # trust clip + bounds
+        # trust clip (normalized units)
         dx = np.clip(dx, -trust, trust)
-        x_new = np.clip(x + dx, lo, hi)
 
-        # predict deltas (for transparency)
-        pred_fr = fr_model.predict([x + dx])[0] - fr_model.predict([x])[0]
-        pred_R  =  R_model.predict([x + dx])[0] -  R_model.predict([x])[0]
-        pred_X  =  X_model.predict([x + dx])[0] -  X_model.predict([x])[0]
+        # --- surrogate line search (backtracking) ---
+        def surrogate_score(xn):
+            fr_p = fr_m.predict([xn])[0]; R_p = R_m.predict([xn])[0]; X_p = X_m.predict([xn])[0]
+            return ((fr_p - f0)**2 / (0.02*f0)**2) + 0.5*((R_p - Z0)/Z0)**2 + 0.7*(X_p/Z0)**2
+
+        sc_here = surrogate_score(x)
+        alpha = 1.0
+        for _ in range(6):
+            x_try = np.clip(x + alpha*dx, -0.6, +0.6)
+            if surrogate_score(x_try) < sc_here:
+                break
+            alpha *= 0.5
+        dx *= alpha
+        x_new = np.clip(x + dx, -0.6, +0.6)
+
+        # log predicted changes (unscaled)
+        pred_fr = fr_m.predict([x_new])[0] - fr_m.predict([x])[0]
+        pred_R  =  R_m.predict([x_new])[0] -  R_m.predict([x])[0]
+        pred_X  =  X_m.predict([x_new])[0] -  X_m.predict([x])[0]
         if verbose:
             print(f"  Predicted changes: Δfr={pred_fr:+.3e}  ΔR={pred_R:+.3e}  ΔX={pred_X:+.3e}")
             print("  Step (trust-clipped):")
-            for k, dki, tr in zip(order, dx, trust):
+            for k, dki, tr in zip(order, dx*span, trust*span):  # report in meters
                 print(f"    {k:<28} Δp={dki:+.3e}  (trust={tr:.3e})")
 
-        # evaluate candidate
+        # evaluate true candidate
         feat_new = eval_and_store(x_new)
         if feat_new is None:
             trust *= 0.6
@@ -249,41 +335,39 @@ def optimize_mifa_poly(
 
         if accept:
             x = x_new
-            trust = np.minimum(trust*1.3, span)   # mild expansion
+            trust = np.minimum(trust*1.3, 0.6)
             if verbose: print("  -> accepted; expanding trust.\n")
         else:
             trust *= 0.7
             if verbose: print("  -> rejected; shrinking trust.\n")
 
-        # grow dataset with a few exploration points around the new center
+        # exploration around new center
         for _ in range(per_iter_samples):
             u = rng.uniform(-1, 1, size=d)
-            cand = np.clip(x + u*trust, lo, hi)
-            eval_and_store(cand)
+            eval_and_store(np.clip(x + u*trust, -0.6, +0.6))
 
-        # update standardization as dataset grows
+        # refresh surrogate standardization
         Xmat = np.array(Xd)
-        x_mean = np.mean(Xmat, axis=0)
-        x_scale = np.std(Xmat, axis=0) + 1e-12
+        x_mean = Xmat.mean(0); x_std = Xmat.std(0) + 1e-12
 
-        if csv_log_path:
-            csv_writer = csv_writer or csv.writer(open(csv_log_path, "w", newline="", encoding="utf-8"))
-            # NOTE: if you want persistent file handle, open above; kept minimal here.
+        if csv_writer:
+            row = [it, feat_new['fr']/1e9, feat_new['R0'], feat_new['X0'], sc_new,
+                   *from_norm(x)]
+            csv_writer.writerow(row)
 
-    # return best (by score) seen in dataset
-    best_idx = None
-    best_score = np.inf
-    best_params = None
-    for xrow, frv, Rv, Xv in zip(Xd, Yr_fr, Yr_R, Yr_X):
-        feat_tmp = {'fr': frv, 'R0': Rv, 'X0': Xv}
-        sc = _score(feat_tmp, f0)
+    if csv_fh: csv_fh.close()
+
+    # return best-by-score from dataset
+    best_idx = None; best_score = np.inf
+    for xn, frv, Rv, Xv in zip(Xd, Yr_fr, Yr_R, Yr_X):
+        sc = ((frv - f0)**2 / (0.02*f0)**2) + 0.5*((Rv - Z0)/Z0)**2 + 0.7*(Xv/Z0)**2
         if sc < best_score:
-            best_score = sc
-            best_idx = xrow
+            best_score = sc; best_idx = xn
     out = dict(p0)
-    for k, v in zip(order, best_idx):
+    for k, v in zip(order, from_norm(best_idx)):
         out[k] = float(v)
     return out
+
 
 parameters = { 'ifa_h': 0.006,
     'ifa_l': 0.027-0.00075,
@@ -295,7 +379,7 @@ parameters = { 'ifa_h': 0.006,
     'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015,
     'mifa_meander': 0.0015, 'mifa_meander_edge_distance': 0.0005,
     'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.6e+09, 'freq_points': 5,
-    'mesh_boundry_size_divisor': 1, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 0.33 }
+    'mesh_boundry_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 0.7 }
 
 keys = ['ifa_l','ifa_fp','ifa_w1','ifa_w2','ifa_wf']
 bounds = {k: (0.8*parameters[k], 1.2*parameters[k]) for k in keys}

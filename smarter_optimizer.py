@@ -17,7 +17,7 @@ def eval_impedance_features(parameters):
     # print(f"parameters: {_fmt_params_singleline_raw(parameters)}")
     model, S11, freq, _, _, _ = build_mifa(parameters,
         view_mesh=False, view_model=False, run_simulation=True,
-        compute_farfield=False, loglevel="ERROR", solver=em.EMSolver.CUDSS)
+        compute_farfield=False, loglevel="WARNING", solver=em.EMSolver.CUDSS)
     if S11 is None:
         return None
     f0 = parameters['f0']
@@ -281,7 +281,7 @@ parameters = { 'ifa_h': 0.006,
         'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015,
         'mifa_meander': 0.0015, 'mifa_meander_edge_distance': 0.0005,
         'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.6e+09, 'freq_points': 5,
-        'mesh_boundry_size_divisor': 1, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 0.33 }
+        'mesh_boundry_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
 
 # Choose knobs with clear L/C effects:
 keys = [
