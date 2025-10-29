@@ -102,7 +102,7 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
 
         import numpy as _np
         import emerge as em
-        from ifalib import build_mifa, get_loss
+        from ifalib import build_mifa, get_loss_at_freq
 
         try:
             solver = getattr(em.EMSolver, solver_name)
@@ -151,7 +151,7 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
         except: pass
 
         # postprocess (short): optional micro-heartbeat if you want
-        rl_db = _np.array([float(get_loss(S11, float(f), freq_dense)) for f in freq_dense], dtype=float)
+        rl_db = _np.array([float(get_loss_at_freq(S11, float(f), freq_dense)) for f in freq_dense], dtype=float)
         try: 
             conn.send(("log", "postprocess_done"))
         except: pass
@@ -720,14 +720,14 @@ def optimize_ifa(
 
     # Final simulate + plot
     logger.info("Optimization complete. Running final verification simulation for best parameters.")
-    from ifalib import build_mifa, get_loss
+    from ifalib import build_mifa, get_loss_at_freq
     import emerge as em
 
     solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
     model, S11, freq_dense, *_ = build_mifa(
         best_params, view_model=False, run_simulation=True, compute_farfield=False, solver=solver_enum
     )
-    rl_best = get_loss(S11, best_params['f0'], freq_dense)
+    rl_best = get_loss_at_freq(S11, best_params['f0'], freq_dense)
 
     logger.info(f"Best RL@f0 = {rl_best:.2f} dB")
     for k in var_keys:
