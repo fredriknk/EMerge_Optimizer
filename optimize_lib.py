@@ -431,8 +431,11 @@ def _objective_factory(
             return -np.abs(y)
 
         # Numpy-ize
-        freq   = np.array(freq_list, dtype=float)
-        rl_db  = _as_rl_db(np.array(y_list))
+        freq  = np.array(freq_list, dtype=float)
+        rl_db = _as_rl_db(np.array(y_list))    # this may be negative; keep as-is for logging
+
+        # Use *positive* RL for all math:
+        rl_pos = np.abs(rl_db)  
 
         # === Multi-frequency, bandwidth-oriented objective in linear |Γ| ===
         # Helpers
@@ -440,6 +443,10 @@ def _objective_factory(
             # RL = -20*log10|Γ|  ->  |Γ| = 10^(-RL/20)
             # clip to <=0 dB to avoid >1 gamma from weird inputs
             return 10.0**(-np.clip(rl_db_arr, -1e6, 0.0)/20.0)
+        
+        def _gamma_from_rl_pos_db(rl_pos_db_arr: np.ndarray) -> np.ndarray:
+            # RL_pos_dB = -20 log10|Γ|  ->  |Γ| = 10^(-RL_pos/20), always ≤ 1
+            return 10.0 ** (-rl_pos_db_arr / 20.0)
 
         # Interpolate RL at f0 for logging and (optional) center penalty
         f0 = float(params['f0'])
@@ -460,33 +467,37 @@ def _objective_factory(
                 if logger:
                     logger.warning(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
                 return float(penalty_if_fail)
+            rl_pos = np.abs(rl_db)
 
+            def _gamma_from_rl_pos_db(rl_pos_db_arr: np.ndarray) -> np.ndarray:
+                # RL_pos_dB = -20*log10|Γ|  -> |Γ| = 10^(-RL_pos/20)  (always ≤ 1)
+                return 10.0 ** (-np.asarray(rl_pos_db_arr, dtype=float) / 20.0)
             # Linear reflection in band
-            gam_band = _gamma_from_rl_db(rl_db[m])
-            # Target in linear
-            rl_target = abs(float(bandwidth_target_db))   # e.g. 10 for -10 dB
-            gam_target = 10.0**(-rl_target/20.0)
+            gam_band = _gamma_from_rl_pos_db(rl_pos[m])
 
-            # Excess over target (0 if meeting target)
+            # Target in linear (e.g., target -10 dB -> |Γ|_t = 0.316)
+            rl_target = abs(float(bandwidth_target_db))      # e.g. 10 for -10 dB
+            gam_target = 10.0 ** (-rl_target / 20.0)
+
+            # Excess above target (≥ 0)
             excess = np.clip(gam_band - gam_target, 0.0, None)
 
-            # Use trapezoidal integral normalized by band width (handles non-uniform grids)
-            band_width = f_hi - f_lo
-            # Numerical safety
-            if band_width <= 0:
+            # Trapezoidal mean excess normalized by band width (handles non-uniform freq grids)
+            band_width = float(f_hi - f_lo)
+            if band_width <= 0.0:
                 return float(penalty_if_fail)
 
-            # Mean excess via integral
             mean_excess = float(np.trapz(excess, freq[m]) / band_width)
 
-            # Robustness: small worst-case term to kill narrow spikes
-            alpha = 0.2  # tune 0.1–0.3 if needed
+            # Robustness: small worst-case term to suppress narrow spikes
+            alpha = 0.2  # tune 0.1–0.3
             max_excess = float(np.max(excess))
 
             # Optional center weighting (very light)
-            beta = 0.1  # set 0.0 to disable
-            ex0 = float(max(_gamma_from_rl_db(np.array([rl_f0]))[0] - gam_target, 0.0))
+            beta = 0.1   # set 0.0 to disable
+            ex0 = float(max(_gamma_from_rl_pos_db([abs(rl_f0)])[0] - gam_target, 0.0))
 
+            # Final penalty (≥ 0); lower is better
             obj = mean_excess + alpha * max_excess + beta * ex0
 
             # Logging aids (meeting spec means RL[dB] <= -rl_target)
