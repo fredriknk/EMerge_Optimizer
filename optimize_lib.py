@@ -487,8 +487,8 @@ def _objective_factory(
             beta = 0.1  # set 0.0 to disable
             ex0 = float(max(_gamma_from_rl_db(np.array([rl_f0]))[0] - gam_target, 0.0))
 
-            obj = mean_excess + alpha * max_excess + beta * ex0
-
+            obj = mean_excess +alpha * max_excess + beta * ex0
+            obj = -1.0 * obj  # we minimize
             # Logging aids (meeting spec means RL[dB] <= -rl_target)
             rl_spec_db = -rl_target
             frac_ok = float(np.mean(rl_db[m] <= rl_spec_db))
