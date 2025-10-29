@@ -411,7 +411,7 @@ def _objective_factory(
             state["avg_eval_s"] = 0.8 * state["avg_eval_s"] + 0.2 * dt  # EMA smoothing
             
         if not ok:
-            logger.warning(f"[eval {state['evals']:04d}] simulation failed ({payload}); applying penalty {penalty_if_fail:g}")
+            logger.warn(f"[eval {state['evals']:04d}] simulation failed ({payload}); applying penalty {penalty_if_fail:g}")
             return float(penalty_if_fail)
 
         # --- Normalize payload to RL[dB] no matter what the simulator returned ---

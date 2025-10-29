@@ -93,7 +93,7 @@ def main():
     best_params, result, summary = run_stage(
         f"{SIMULATION_NAME}_refine2",
         p, bounds,
-        maxiter=10, popsize=30, seed=3,
+        maxiter=10, popsize=30, seed=4,
         solver_name=SOLVER, timeout=200.0,
         bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
         include_start=False, log_every_eval=True
