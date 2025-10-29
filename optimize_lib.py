@@ -460,7 +460,7 @@ def _objective_factory(
             if not np.any(m):
                 # Band does not overlap simulated grid -> hard penalty
                 if logger:
-                    logger.warning(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
+                    logger.warn(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
                 return float(penalty_if_fail)
 
             # Linear reflection (|Γ|) in-band
