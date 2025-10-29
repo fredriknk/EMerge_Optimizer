@@ -1,6 +1,6 @@
 import emerge as em
 import numpy as np
-from ifalib import build_mifa, get_s11_at_freq, get_loss
+from ifalib import build_mifa, get_s11_at_freq, get_loss_at_freq
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
 
 """ PATCH ANTENNA DEMO
@@ -122,5 +122,5 @@ model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
 
 if S11 is not None:
     print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")
-    print(f"S11 return loss (dB) at {parameters['f0']/1e9} GHz: {get_loss(S11, parameters['f0'], freq_dense)} dB")
+    print(f"S11 return loss (dB) at {parameters['f0']/1e9} GHz: {get_loss_at_freq(S11, parameters['f0'], freq_dense)} dB")
     plot_sp(freq_dense, S11)                       # plot return loss in dB

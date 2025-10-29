@@ -325,7 +325,7 @@ def build_mifa(params,
 
     return model, S11,freq_dense, ff1,ff2,ff3d
 
-def get_loss(S11,f0,freq_dense):
+def get_loss_at_freq(S11,f0,freq_dense):
     """Compute return loss (dB) from S11 complex values."""
     # If you need to interpolate complex S11 first, do real & imag separately:
     S11_re = np.interp(f0, freq_dense, S11.real)
@@ -335,6 +335,13 @@ def get_loss(S11,f0,freq_dense):
     # Return loss (positive dB number)
     RL_dB = -20*np.log10(np.abs(S11_f0))
     return RL_dB
+
+def get_resonant_frequency(S11, freq_dense):
+    """Get resonant frequency (minimum |S11|) in the S11 data."""
+    RL_dB = -20*np.log10(np.abs(S11))
+    idx_min = np.argmax(np.abs(RL_dB))
+    f_resonant = freq_dense[idx_min]
+    return f_resonant
 
 def get_s11_at_freq(S11,f0,freq_dense):
     """Get S11 complex value at center frequency."""

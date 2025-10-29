@@ -1,7 +1,7 @@
 import csv
 import numpy as np
 import emerge as em
-from ifalib import build_mifa
+from ifalib import build_mifa,get_resonant_frequency
 from optimize_lib import _fmt_params_singleline_raw
 
 Z0 = 50.0
@@ -10,20 +10,11 @@ def s_to_zin(S11):
     return Z0 * (1.0 + S11) / (1.0 - S11)
 
 def find_fr(freq, S11, f_hint):
-    Zin = s_to_zin(S11)
-    X = np.imag(Zin)
-    idx = np.argsort(np.abs(freq - f_hint))[:15]
-    idx = np.sort(idx)
-    f_loc, X_loc = freq[idx], X[idx]
-    k = np.argmin(np.abs(X_loc))
-    if 0 < k < len(f_loc)-1 and X_loc[k-1]*X_loc[k+1] <= 0:
-        f1, x1 = f_loc[k-1], X_loc[k-1]
-        f2, x2 = f_loc[k+1], X_loc[k+1]
-        if x2 != x1:
-            return float(f1 - x1*(f2-f1)/(x2-x1))
-    return float(f_loc[k])
+    fr= get_resonant_frequency(S11=S11, freq_dense=freq)
+    return float(fr)
 
 def eval_impedance_features(parameters):
+    # print(f"parameters: {_fmt_params_singleline_raw(parameters)}")
     model, S11, freq, _, _, _ = build_mifa(parameters,
         view_mesh=False, view_model=False, run_simulation=True,
         compute_farfield=False, loglevel="ERROR", solver=em.EMSolver.CUDSS)
@@ -31,6 +22,7 @@ def eval_impedance_features(parameters):
         return None
     f0 = parameters['f0']
     fr = find_fr(freq, S11, f0)
+    # robust complex interpolation at f0
     S = np.interp(f0, freq, S11.real) + 1j*np.interp(f0, freq, S11.imag)
     Zin0 = s_to_zin(S)
     R0, X0 = float(np.real(Zin0)), float(np.imag(Zin0))
@@ -68,6 +60,21 @@ def _fmt_table(headers, rows, colw=11):
     body = "\n".join(" ".join(str(v)[:colw].ljust(colw) for v in r) for r in rows)
     return line + "\n" + body
 
+def _mini_sweep_report(params, center, df=15e6):
+    """3-point sweep at f0±df to show R/X slope."""
+    p = dict(params)
+    p['f1'], p['f0'], p['f2'] = center - df, center, center + df
+    p['freq_points'] = 3
+    m, S11, f, *_ = build_mifa(p, view_mesh=False, view_model=False, run_simulation=True,
+                               compute_farfield=False, loglevel="ERROR", solver=em.EMSolver.CUDSS)
+    if S11 is None:
+        print("  Mini-sweep: simulation failed.")
+        return
+    Zin = s_to_zin(S11)
+    R = np.real(Zin); X = np.imag(Zin)
+    print(f"  Mini-sweep @ f0±{df/1e6:.0f} MHz:  X[lo,0,hi]=[{X[0]:+.1f}, {X[1]:+.1f}, {X[2]:+.1f}] Ω;  "
+          f"R[lo,0,hi]=[{R[0]:.1f}, {R[1]:.1f}, {R[2]:.1f}] Ω")
+
 def physics_optimize_mifa(
     initial_params: dict,
     bounds: dict,
@@ -75,14 +82,22 @@ def physics_optimize_mifa(
     max_iters=12,
     rel_probe=0.02,
     trust_frac=0.15,
-    wR=0.8, wX=1.0,
+    wR=0.8, wX=1.0,           # base weights (will be adapted by phase)
     ridge=1e-6,
-    verbose=2,                   # 0=silent, 1=brief, 2=detailed
-    csv_log_path=None            # e.g., "opt_trace.csv"
+    verbose=2,                # 0=silent, 1=brief, 2=detailed
+    csv_log_path=None,        # e.g., "opt_trace.csv"
+    # --- new knobs below ---
+    per_param_ridge: dict = None,     # e.g., {'ifa_w1':5e-5, 'ifa_w2':5e-5, ...}
+    trust_caps: dict = None,          # fraction of span per param, e.g., {'ifa_w1':0.05,...}
+    x_phase_thresh_ohm: float = 5.0,  # switch to phase 2 when |X| <= this
+    mini_sweep_df_hz: float = 15e6    # 3-point sweep offset
 ):
     """
-    Verbose, physics-informed optimizer.
-    Prints Jacobians, proposed Δp, clipping, scores, accept/reject, and trust updates.
+    Verbose, physics-informed optimizer with:
+    - per-parameter ridge
+    - two-phase weighting (phase 1: kill X; phase 2: refine R)
+    - per-parameter trust caps
+    - mini 3-point sweep around f0 each iteration
     """
     params = dict(initial_params)
 
@@ -92,6 +107,12 @@ def physics_optimize_mifa(
 
     spans  = {k: (bounds[k][1] - bounds[k][0]) for k in keys_to_tune}
     trust  = {k: trust_frac*max(spans[k], 1e-12) for k in keys_to_tune}
+
+    # # Apply per-parameter trust caps (fractions of span)
+    # if trust_caps:
+    #     for k, frac in trust_caps.items():
+    #         if k in trust and spans[k] > 0:
+    #             trust[k] = min(trust[k], float(frac) * spans[k])
 
     # CSV logger
     csv_writer = None
@@ -113,20 +134,32 @@ def physics_optimize_mifa(
         f0, fr, R0, X0 = params['f0'], feat['fr'], feat['R0'], feat['X0']
         err_fr, err_R, err_X = (f0 - fr), (Z0 - R0), (-X0)
 
+        # --- Phase selection: prioritize X first, then R ---
+        if abs(X0) > x_phase_thresh_ohm:
+            wR_eff, wX_eff = 0.3*wR, 1.4*wX   # kill reactance, keep R changes restrained
+            phase = 1
+        else:
+            wR_eff, wX_eff = 1.2*wR, 0.8*wX   # bring R→50 without re-introducing big X
+            phase = 2
+
         if verbose >= 1:
             print(f"[it {it}] fr={fr/1e9:.4f} GHz  @f0: R={R0:.2f}Ω X={X0:.2f}Ω  "
-                  f"targets: Δfr={err_fr/1e6:.2f} MHz, ΔR={err_R:.2f}, ΔX={err_X:.2f}")
+                  f"targets: Δfr={err_fr/1e6:.2f} MHz, ΔR={err_R:.2f}, ΔX={err_X:.2f}  (phase {phase})")
 
         # Sensitivities
         dfr, dR, dX = finite_diff_sensitivities(params, keys_to_tune, feat, rel_step=rel_probe)
 
         # Stack system  A Δp = b
-        A = np.vstack([dfr, wR*dR, wX*dX])
-        b = np.array([err_fr, wR*err_R, wX*err_X], dtype=float)
+        A = np.vstack([dfr, wR_eff*dR, wX_eff*dX])
+        b = np.array([err_fr, wR_eff*err_R, wX_eff*err_X], dtype=float)
 
-        # Regularized LS
+        # Regularized LS with per-parameter ridge
         AT = A.T
-        H = AT @ A + ridge*np.eye(len(keys_to_tune))
+        if per_param_ridge:
+            Lam = np.diag([float(per_param_ridge.get(k, ridge)) for k in keys_to_tune])
+        else:
+            Lam = ridge*np.eye(len(keys_to_tune))
+        H = AT @ A + Lam
         g = AT @ b
         try:
             dp_unclipped = np.linalg.solve(H, g)
@@ -139,6 +172,9 @@ def physics_optimize_mifa(
         new_params = dict(params)
         for k, dpk in zip(keys_to_tune, dp_unclipped):
             dlim = trust[k]
+            # apply per-parameter trust caps again here (robustness)
+            if trust_caps and k in trust_caps:
+                dlim = min(dlim, trust_caps[k]*spans[k])
             dpt = float(np.clip(dpk, -dlim, dlim))
             dp_trust.append(dpt)
             cand = params[k] + dpt
@@ -147,8 +183,22 @@ def physics_optimize_mifa(
             dp_clipped.append(cand_c - params[k])
             new_params[k] = cand_c
 
-        # Linear prediction (for intuition only)
-        # Using trust-clipped dp to predict improvements
+        # Predictions & contributions
+        dp_vec = np.array(dp_trust)
+        pred = A @ dp_vec
+        labels = ["Δfr_pred [Hz]", "wR·ΔR_pred [Ω]", "wX·ΔX_pred [Ω]"]
+        print("\n  Predicted target changes (linear model):")
+        for lab, val, tgt in zip(labels, pred, b):
+            print(f"    {lab}: {val:+.3e}  vs  target {tgt:+.3e}  (residual {val - tgt:+.3e})")
+
+        print("\n  Per-parameter contributions:")
+        row_names = ["dfr", "wR·dR", "wX·dX"]
+        for rname, row in zip(row_names, A):
+            print(f"   {rname}:")
+            for k, a_ik, dpk in zip(keys_to_tune, row, dp_vec):
+                print(f"      {k:<30}  a={a_ik:+.3e} · Δp={dpk:+.3e}  → {a_ik*dpk:+.3e}")
+
+        # Linear model residual norm (for intuition only)
         pred_err = A @ np.array(dp_trust) - b
         pred_norm = float(np.linalg.norm(pred_err))
         if verbose >= 2:
@@ -159,8 +209,8 @@ def physics_optimize_mifa(
                 rows.append([
                     k,
                     f"{dfr[i]:+.3e}",
-                    f"{(wR*dR[i]):+.3e}",
-                    f"{(wX*dX[i]):+.3e}"
+                    f"{(wR_eff*dR[i]):+.3e}",
+                    f"{(wX_eff*dX[i]):+.3e}"
                 ])
             print(_fmt_table(["param","dfr","wR*dR","wX*dX"], rows))
 
@@ -194,11 +244,15 @@ def physics_optimize_mifa(
 
         if accepted:
             params = new_params
+            # expand trust a bit on success
             for k in trust:
                 trust[k] = min(trust[k]*1.4, spans[k])
             if verbose:
-                print("  -> accepted; expanding trust.\n")
+                print("  -> accepted; expanding trust.")
+                #mini_sweep_report(params, f0, df=mini_sweep_df_hz)
+                print()
         else:
+            # shrink trust on no-improve
             for k in trust:
                 trust[k] *= 0.6
             if verbose:
@@ -216,37 +270,54 @@ def physics_optimize_mifa(
 
     return params
 
-parameters = { 'ifa_h': 0.006, 
-        'ifa_l': 0.027-0.00075, 
-        'ifa_w1': 0.0015, 
-        'ifa_w2': 0.0005, 
-        'ifa_wf': 0.0005, 
+# ---------------- Example run (yours) ----------------
+parameters = { 'ifa_h': 0.006,
+        'ifa_l': 0.027-0.00075,
+        'ifa_w1': 0.0015,
+        'ifa_w2': 0.0005,
+        'ifa_wf': 0.0005,
         'ifa_fp': 0.0025,
-        'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
-        'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 
-        'mifa_meander': 0.0015, 'mifa_meander_edge_distance': 0.0005, 
-        'f1': 2.4e+09, 'f0': 2.45e+09, 'f2': 2.5e+09, 'freq_points': 3, 
+        'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005,
+        'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015,
+        'mifa_meander': 0.0015, 'mifa_meander_edge_distance': 0.0005,
+        'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.6e+09, 'freq_points': 5,
         'mesh_boundry_size_divisor': 1, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 0.33 }
 
 # Choose knobs with clear L/C effects:
 keys = [
-    'ifa_l','mifa_meander','mifa_meander_edge_distance',
-    'ifa_fp','ifa_w1','ifa_w2','ifa_wf'
+    'ifa_l','ifa_fp','ifa_w1','ifa_w2','ifa_wf'
 ]
 bounds = {k: (0.8*parameters[k], 1.2*parameters[k]) for k in keys}
 for k,v in parameters.items():
     bounds.setdefault(k, (v, v))
 
+# # Make widths "expensive" and trust-capped; steer X with C knobs first
+# per_param_ridge = {
+#     'ifa_w2': 5e-5, 'ifa_wf': 5e-5,          # widths move only if needed
+#     'mifa_meander_edge_distance': 2e-5, 'ifa_w1': 2e-5,                  # mild preference not to overuse
+#     'ifa_l': 1e-6, 'mifa_meander': 2e-6, 'ifa_fp': 2e-6      # cheap (primary steering knobs)
+# }
+
+# Make widths "expensive" and trust-capped; steer X with C knobs first
+per_param_ridge = {
+    'ifa_w2': 5e-5, 'ifa_wf': 5e-5,          # widths move only if needed
+    'ifa_w1': 2e-5,                  # mild preference not to overuse
+    'ifa_l': 1e-6, 'ifa_fp': 2e-6      # cheap (primary steering knobs)
+}
+
+
 best = physics_optimize_mifa(
     initial_params=parameters,
     bounds=bounds,
     keys_to_tune=keys,
-    max_iters=10,
-    rel_probe=0.005,
-    trust_frac=0.01,
+    max_iters=1000,
+    rel_probe=0.0005,
+    trust_frac=0.005,
     wR=0.8, wX=1.0,
-    verbose=2,                       # <= turn down to 1 if too chatty
-    csv_log_path="opt_trace.csv"     # optional
+    verbose=1,
+    csv_log_path="opt_trace.csv",
+    x_phase_thresh_ohm=5.0,
+    mini_sweep_df_hz=15e6
 )
 
 print("Best params:", _fmt_params_singleline_raw(best))
