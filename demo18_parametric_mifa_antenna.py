@@ -1,6 +1,6 @@
 import emerge as em
 import numpy as np
-from ifalib import build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency
+from ifalib import build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency,get_bandwidth
 from optimize_lib import _fmt_params_singleline_raw
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
 
@@ -57,7 +57,7 @@ mifa_21x90_2450mhz = {
     'ifa_w1': 0.000550173526, 
     'ifa_w2': 0.00129312109, 
     'ifa_wf': 0.000433478781, 
-    'mesh_boundry_size_divisor': 0.33,
+    'mesh_boundary_size_divisor': 0.33,
     'mesh_wavelength_fraction': 0.2, 
     'mifa_meander': 0.002, 
     'mifa_meander_edge_distance': 0.003, 
@@ -72,14 +72,28 @@ mifa_14x25_2450mhz = {
     'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 
     'mifa_meander': 0.00195527223, 'mifa_meander_edge_distance': 0.00217823618, 
     'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.7e+09, 'freq_points': 5, 
-    'mesh_boundry_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
+    'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
 
-parameters = mifa_14x25_2450mhz
-parameters = mifa_21x90_2450mhz
+mifa_30x110_821mhz = { 
+    'ifa_h': 0.0230161676, 'ifa_l': 0.107128555, 
+    'ifa_w1': 0.00045360957, 'ifa_w2': 0.000439352308, 'ifa_wf': 0.000411214503, 
+    'ifa_fp': 0.00722339282, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
+    'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 
+    'mifa_meander': 0.00169312729, 'mifa_meander_edge_distance': 0.003, 
+    'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 
+    'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 
+    'ifa_mifa_meander_edge_distance': 0.0185312452 }
+
+parameters = mifa_30x110_821mhz
+
+parameters['f1'] = parameters['f0'] - 2e8
+parameters['f2'] = parameters['f0'] + 2e8
+parameters['freq_points'] = 5
 
 model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
-                                                   view_mesh=True, view_model=True,run_simulation=True,compute_farfield=True,
-                                                   loglevel="INFO",solver=em.EMSolver.CUDSS,validate_ifa_antenna=True)
+                                                   view_mesh=True, view_model=True,
+                                                   run_simulation=True,compute_farfield=True,
+                                                   loglevel="INFO",solver=em.EMSolver.CUDSS)
 
 if S11 is not None:
     print(_fmt_params_singleline_raw(parameters))
@@ -91,11 +105,11 @@ if S11 is not None:
     print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")
     print(f"S11 return loss (dB) at {parameters['f0']/1e9} GHz: {get_loss_at_freq(S11, parameters['f0'], freq_dense)} dB")
     print(f"Resonant frequency (min |S11|): {get_resonant_frequency(S11, freq_dense)/1e9} GHz")
-    print(f"RL_DB_ARRAY: {RL_dB}")
-    print(f"S11 Array: {S11}")
-    print(f"Frequency Dense array: {freq_dense}")
+    bw = get_bandwidth(S11, freq_dense, rl_threshold_dB=-10, f0=parameters['f0'])
+    print(f"Bandwidth (-10 dB): {(bw[1]-bw[0])/1e6} MHz, from/to {bw/1e6} MHz")
+    
     plot_sp(freq_dense, S11)                       # plot return loss in dB
-    smith(S11, f=freq_dense, labels='S11',markers="x")         # Smith chart of S11
+    smith(S11, f=freq_dense, labels='S11')         # Smith chart of S11
 
     
     # --- Far-field radiation pattern ----------------------------------------

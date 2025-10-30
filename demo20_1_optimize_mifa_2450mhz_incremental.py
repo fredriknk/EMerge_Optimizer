@@ -43,7 +43,7 @@ parameters = mifa_14x25_2450mhz = {
     'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 
     'mifa_meander': 0.00195527223, 'mifa_meander_edge_distance': 0.00217823618, 
     'f1': 2.4e+09, 'f0': 2.45e+09, 'f2': 2.5e+09, 'freq_points': 3, 
-    'mesh_boundry_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
+    'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
 
 epsilon_r = 4.4  # FR4 typical
 calc_wavelength_at_2_45ghz = (3e8 / 2.45e9)*epsilon_r**0.5
@@ -91,7 +91,7 @@ def main():
     
     p['lambda_scale'] = 1.0
     p['mesh_wavelength_fraction'] = 0.20
-    p['mesh_boundry_size_divisor'] = 0.33
+    p['mesh_boundary_size_divisor'] = 0.33
     
 
     best_local, sum_local = local_minimize_ifa(

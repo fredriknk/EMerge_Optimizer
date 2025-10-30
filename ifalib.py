@@ -4,31 +4,35 @@ import numpy as np
 from ifa_validation import validate_ifa_params
 
 def build_mifa_plates(
-    *,
-    # --- board / antenna params (all in meters) ---
-    substrate_width,          # total PCB width (x extent available for the radiator)
-    substrate_thickness,      # PCB thickness (not used here, but often handy)
-    ifa_l,                    # total desired electrical length (projected along x)
-    ifa_h,                    # height of radiator above ground (y)
-    ifa_w2,                   # radiator strip width
-    ifa_fp,                   # feed offset from board origin along x (see your sketch)
-    ifa_e,                    # edge clearance along x (keep-out from left)
-    ifa_e2,                   # edge clearance along x (keep-out from right)
-    ifa_te,                   # edge clearance along y (keep-out from top)
-    # --- meander/tip geometry knobs ---
-    mifa_meander,             # horizontal meander step (x)
-    mifa_meander_edge_distance,  # y-clearance from ground edge for meanders
-    mifa_tipdistance,         # y-clearance for the tip element
+    parameters = None,
     # --- placement ---
     tl=np.array([0.0, 0.0, 0.0]),  # global translation vector
     # --- bookkeeping ---
     name_prefix="ifa",
-    priority=10
+    priority=10,
 ):
     """
     Returns a list of em.geo.XYPlate objects representing the IFA radiator geometry
     (no meshing calls). Coordinates follow your ASCII sketch; z=0 plane.
     """
+    if parameters is None:
+        raise ValueError("parameters dict is required.")
+    
+    # --- board / antenna params (all in meters) ---
+    substrate_width = parameters['board_wsub']          # total PCB width (x extent available for the radiator)
+    
+    ifa_l = parameters['ifa_l']                    # total desired electrical length (projected along x)
+    ifa_h = parameters['ifa_h']                    # height of radiator above ground (y)
+    ifa_w2 = parameters['ifa_w2']                   # radiator strip width
+    ifa_fp = parameters['ifa_fp']                   # feed offset from board origin along x (see your sketch)
+    ifa_e = parameters['ifa_e']                    # edge clearance along x (keep-out from left)
+    ifa_e2 = parameters['ifa_e2']                   # edge clearance along x (keep-out from right)
+    
+    # --- meander/tip geometry knobs ---
+    mifa_meander = parameters['mifa_meander']             # horizontal meander step (x)
+    mifa_meander_edge_distance = parameters['mifa_meander_edge_distance']  # y-clearance from ground edge for meanders
+    mifa_tipdistance = parameters.get('mifa_tipdistance', mifa_meander_edge_distance)         # y-clearance for the tip element
+
     mm = 0.001  # meters per millimeter
     plates = []
 
@@ -36,7 +40,8 @@ def build_mifa_plates(
         """Convert 'start/stop' corners into an XYPlate and append it."""
         x0, y0, _ = start
         x1, y1, _ = stop
-        pos = (min(x0, x1), min(y0, y1), 0.0)
+        z = start[2]
+        pos = (min(x0, x1), min(y0, y1), z)
         w = abs(x1 - x0)
         h = abs(y1 - y0)
         if w <= 0 or h <= 0:
@@ -136,15 +141,32 @@ def build_mifa_plates(
     #add_base()
     return plates
 
-def build_mifa(params,
+def add_feedstub(parameters, fp_origin):
+    """Add feed stub to the model at given feed point origin."""
+    ifa_stub = parameters["ifa_fp"]-parameters["ifa_e"]
+    ifa_short_circuit_stub= em.geo.XYPlate(
+        parameters["ifa_w1"], 
+        parameters["ifa_h"] + 2*parameters["via_size"],   
+        position=fp_origin + np.array([-ifa_stub, 
+                                       -2*parameters["via_size"], 0.0]))
+    return ifa_short_circuit_stub
+
+def add_ss_via(parameters, fp_origin,via_name="via"):
+    ifa_stub = parameters["ifa_fp"]-parameters["ifa_e"]
+    via_coord = em.CoordinateSystem(xax = (1,0,0),yax = (0,1,0),zax = (0,0,1),origin=fp_origin + np.array([-ifa_stub+parameters["ifa_w1"]/2, -parameters["via_size"], 0]))
+    via = em.geo.Cylinder(parameters['via_size']/2, -parameters['board_th'], cs=via_coord,name=via_name)
+    return via
+
+def build_mifa(p,
                model=None,
                view_mesh=False,
                view_model=False,
-               run_simulation=True,
-               compute_farfield=True,
+               run_simulation=False,
+               compute_farfield=False,
                loglevel="ERROR",
                solver=em.EMSolver.PARDISO,
-               validate_ifa_antenna=True):
+               validate_ifa_antenna=True,
+               return_skeleton=False):
     if model is None:
         model = em.Simulation('PatchAntenna', loglevel=loglevel)
         model.set_solver(solver)
@@ -155,50 +177,50 @@ def build_mifa(params,
 
     # --- Antenna geometry dimensions ----------------------------------------
     if validate_ifa_antenna == True:
-        errs, warns, drv = validate_ifa_params(params)
+        errs, warns, drv = validate_ifa_params(p)
         if errs:
             for err in errs:
                 print(f"Parameter validation error: {err}")
             raise ValueError("IFA parameter validation failed.")
 
-    ifa_h = params['ifa_h']
-    ifa_l = params['ifa_l'] 
-    ifa_w1 = params['ifa_w1'] 
-    ifa_w2 = params['ifa_w2'] 
-    ifa_wf = params['ifa_wf'] 
-    ifa_fp= params['ifa_fp'] 
-    ifa_e = params['ifa_e'] #right side edge clearance
-    ifa_e2 = params['ifa_e2'] #left side edge clearance
-    ifa_te = params['ifa_te'] #top edge clearance
-    
-    ifa_stub = ifa_fp-ifa_e
-    
-    via_size = params['via_size'] 
-    mifa_meander = params['mifa_meander'] 
-    
-    mifa_meander_edge_distance = params['mifa_meander_edge_distance'] 
-    mifa_tipdistance = params.get('mifa_tipdistance', mifa_meander_edge_distance)
+    ifa_h = p['ifa_h']
+    ifa_l = p['ifa_l'] 
+    ifa_w1 = p['ifa_w1'] 
+    ifa_w2 = p['ifa_w2'] 
+    ifa_wf = p['ifa_wf'] 
+    ifa_fp= p['ifa_fp'] 
+    ifa_e = p['ifa_e'] #right side edge clearance
+    ifa_e2 = p['ifa_e2'] #left side edge clearance
+    ifa_te = p['ifa_te'] #top edge clearance
 
-    board_wsub = params['board_wsub']          # substrate width
-    board_hsub = params['board_hsub']          # substrate length
-    board_th = params['board_th']          # substrate thickness
+    ifa_stub = p['ifa_fp']-p['ifa_e']
+
+    via_size = p['via_size'] 
+    mifa_meander = p['mifa_meander'] 
+    
+    mifa_meander_edge_distance = p['mifa_meander_edge_distance'] 
+    mifa_tipdistance = p.get('mifa_tipdistance', mifa_meander_edge_distance)
+
+    board_wsub = p['board_wsub']          # substrate width
+    board_hsub = p['board_hsub']          # substrate length
+    board_th = p['board_th']          # substrate thickness
     
     # Refined frequency range for antenna resonance around 1.54–1.6 GHz
-    f1 = params['f1']             # start frequency
-    f2 = params['f2']             # stop frequency
-    freq_points = params['freq_points']           # number of frequency points
+    f1 = p['f1']             # start frequency
+    f2 = p['f2']             # stop frequency
+    freq_points = p['freq_points']           # number of frequency points
     
-    mesh_boundry_size_divisor = params['mesh_boundry_size_divisor']
-    mesh_wavelength_fraction = params['mesh_wavelength_fraction']
+    mesh_boundary_size_divisor = p['mesh_boundary_size_divisor']
+    mesh_wavelength_fraction = p['mesh_wavelength_fraction']
     
     
     # --- Define geometry primitives -----------------------------------------
     # Substrate block centered at origin in XY, thickness in Z (negative down)
-    dielectric = em.geo.Box(board_wsub, board_hsub, board_th,
-                            position=(-board_wsub/2, -board_hsub/2, -board_th))
+    dielectric = em.geo.Box(p['board_wsub'], p['board_hsub'], p['board_th'],
+                            position=(-p['board_wsub']/2, -p['board_hsub']/2, -p['board_th']))
 
-    lambda1 = em.lib.C0 / ((f1))*params.get('lambda_scale',1)
-    lambda2 = em.lib.C0 / ((f2))*params.get('lambda_scale',1)
+    lambda1 = em.lib.C0 / ((f1))*p.get('lambda_scale',1)
+    lambda2 = em.lib.C0 / ((f2))*p.get('lambda_scale',1)
     # Asymmetric margins (scale if you need to shrink/grow the domain)
     fwd     = 0.50*lambda2   #in antenna direction
     back    = 0.30*lambda2   #behind PCB
@@ -210,66 +232,67 @@ def build_mifa(params,
     Rair    = 0.5*lambda2+board_hsub/2   # air sphere radius
 
     # Air box dimensions & placement (assume PCB spans x∈[0, pcbL], y∈[-pcbW/2, +pcbW/2], z≈0..mifaH)
-    airX = board_hsub + fwd + back
-    airY = board_wsub + sideL + sideR
-    airZ = top + bot+board_th 
-    x0, y0, z0 =  -sideL-board_wsub/2, -back-board_hsub/2, -bot-board_th/2
+    airX = p['board_hsub'] + fwd + back
+    airY = p['board_wsub'] + sideL + sideR
+    airZ = top + bot + p['board_th']
+    x0, y0, z0 = -sideL - p['board_wsub']/2, -back - p['board_hsub']/2, -bot - p['board_th']/2
 
 
     # Air volume around substrate (Z positive)
     #air = em.geo.Sphere(Rair).background()
     air = em.geo.Box(airY,airX, airZ, position=(x0, y0, z0)).background()
 
-    fp_origin = np.array([-board_wsub/2 + ifa_fp, board_hsub/2 - ifa_h - ifa_te, 0.0])
+    fp_origin = np.array([-p['board_wsub']/2 + p['ifa_fp'], p['board_hsub']/2 - p['ifa_h'] - p['ifa_te'], 0.0])
         
     plates = build_mifa_plates(
-        substrate_width=board_wsub, substrate_thickness=board_th,
-        ifa_l=ifa_l, ifa_h=ifa_h, ifa_w2=ifa_w2, ifa_fp=ifa_fp, ifa_e=ifa_e,ifa_e2=ifa_e2,
-        ifa_te=ifa_te, mifa_meander=mifa_meander, mifa_meander_edge_distance=mifa_meander_edge_distance,
-        mifa_tipdistance=mifa_tipdistance, tl=fp_origin+np.array([0, 0, 0]), name_prefix="ifa"
+        p, tl=fp_origin+np.array([0, 0, 0]), name_prefix="ifa"
     )
 
-    ifa_feed_stub         = em.geo.XYPlate(ifa_wf, ifa_h + 2*via_size,       position=fp_origin + np.array([0.0, -2*via_size, 0.0]))
-    ifa_short_circuit_stub= em.geo.XYPlate(ifa_w1, ifa_h + 2*via_size,   position=fp_origin + np.array([-ifa_stub, -2*via_size, 0.0]))
+    ifa_feed_stub         = em.geo.XYPlate(p['ifa_wf'], p['ifa_h'] + 2*p['via_size'],       position=fp_origin + np.array([0.0, -2*p['via_size'], 0.0]))
+    ifa_short_circuit_stub = add_feedstub(p, fp_origin)
     # ifa_radiating_element = em.geo.XYPlate(ifa_l,  ifa_w2,                 position=fp_origin + np.array([-ifa_stub,  ifa_h - ifa_w2, 0.0]))
 
-    via_coord = em.CoordinateSystem(xax = (1,0,0),yax = (0,1,0),zax = (0,0,1),origin=fp_origin + np.array([-ifa_stub+ifa_w1/2, -via_size, 0]))
-    via = em.geo.Cylinder(via_size/2, -board_th, cs=via_coord)
+    via = add_ss_via(p, fp_origin)
 
-    ground = em.geo.XYPlate(board_wsub, fp_origin[1]+board_hsub/2, position=(-board_wsub/2, -board_hsub/2, -board_th)).set_material(em.lib.PEC)
+    ground = em.geo.XYPlate(p['board_wsub'], fp_origin[1]+p['board_hsub']/2, position=(-p['board_wsub']/2, -p['board_hsub']/2, -p['board_th'])).set_material(em.lib.PEC)
 
 
     # Plate defining lumped port geometry (origin + width/height vectors)
     port = em.geo.Plate(
-        fp_origin+np.array([0, -2*via_size, 0]),  # lower port corner
-        np.array([ifa_wf, 0, 0]),                # width vector along X
-        np.array([0, 0, -board_th])                    # height vector along Z
+        fp_origin+np.array([0, -2*p['via_size'], 0]),  # lower port corner
+        np.array([p['ifa_wf'], 0, 0]),                # width vector along X
+        np.array([0, 0, -p['board_th']])                    # height vector along Z
     )
+    
     ifa = plates[0]
-    for p in plates[1:]:
-        ifa = em.geo.add(ifa, p)
+    for plate in plates[1:]:
+        ifa = em.geo.add(ifa, plate)
 
     # # Build final ifa shape
     ifa = em.geo.add(ifa, ifa_feed_stub)
     ifa = em.geo.add(ifa, ifa_short_circuit_stub)
+
+    if return_skeleton:
+        return model, ifa, via, dielectric, air, port, ground
+    
     ifa.set_material(em.lib.PEC)
     via.set_material(em.lib.PEC)
     # --- Assign materials and simulation settings ---------------------------
     # Dielectric material with some transparency for display
     dielectric.material = em.Material(3.38, color="#207020", opacity=0.9)
-    
+
     model.commit_geometry()
-    
-    model.mw.set_resolution(mesh_wavelength_fraction)
-    model.mw.set_frequency_range(f1, f2, freq_points)
-        
-    smallest_instance = min(ifa_w2, ifa_wf, ifa_w1)
-    smallest_via = min(via_size, board_th)
-    smallest_port = min(ifa_wf, board_th)
-    
-    model.mesher.set_boundary_size(ifa, smallest_instance*mesh_boundry_size_divisor)
-    model.mesher.set_boundary_size(via, smallest_via*mesh_boundry_size_divisor)
-    model.mesher.set_face_size(port, smallest_port*mesh_boundry_size_divisor)
+
+    model.mw.set_resolution(p['mesh_wavelength_fraction'])
+    model.mw.set_frequency_range(p['f1'], p['f2'], p['freq_points'])
+
+    smallest_instance = min(p['ifa_w2'], p['ifa_wf'], p['ifa_w1'])
+    smallest_via = min(p['via_size'], p['board_th'])
+    smallest_port = min(p['ifa_wf'], p['board_th'])
+
+    model.mesher.set_boundary_size(ifa, smallest_instance*p['mesh_boundary_size_divisor'])
+    model.mesher.set_boundary_size(via, smallest_via*p['mesh_boundary_size_divisor'])
+    model.mesher.set_face_size(port, smallest_port*p['mesh_boundary_size_divisor'])
 
     # --- Generate mesh and preview ------------------------------------------
     model.mesher.set_algorithm(em.Algorithm3D.HXT)
@@ -287,7 +310,7 @@ def build_mifa(params,
     # Define lumped port with specified orientation and impedance
     port_bc = model.mw.bc.LumpedPort(
     port, 1,
-    width=ifa_wf, height=board_th,
+    width=p['ifa_wf'], height=p['board_th'],
     direction=em.ZAX, Z0=50
     )
 
@@ -304,7 +327,7 @@ def build_mifa(params,
 
     # --- Post-process S-parameters ------------------------------------------
     freqs = data.scalar.grid.freq
-    freq_dense = np.linspace(f1, f2, 1001)
+    freq_dense = np.linspace(p['f1'], p['f2'], 1001)
     
     S11 = data.scalar.grid.model_S(1, 1, freq_dense)
     

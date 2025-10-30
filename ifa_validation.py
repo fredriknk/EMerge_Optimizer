@@ -15,7 +15,7 @@ def validate_ifa_params(p):
         'via_size','board_wsub','board_hsub','board_th',
         'mifa_meander','mifa_meander_edge_distance',
         'f1','f0','f2','freq_points',
-        'mesh_boundry_size_divisor','mesh_wavelength_fraction','lambda_scale'
+        'mesh_boundary_size_divisor','mesh_wavelength_fraction','lambda_scale'
     ]
     missing = [k for k in req if k not in p]
     if missing:
@@ -42,7 +42,7 @@ def validate_ifa_params(p):
     f0      = float(p['f0'])
     f2      = float(p['f2'])
     freq_points   = int(p['freq_points'])
-    mesh_boundry_size_divisor    = float(p['mesh_boundry_size_divisor'])
+    mesh_boundary_size_divisor    = float(p['mesh_boundary_size_divisor'])
     mesh_wavelength_fraction  = float(p['mesh_wavelength_fraction'])
     lambda_scale  = float(p['lambda_scale'])
     clearance    = float(p.get('clearance', 0.0003))
@@ -57,7 +57,7 @@ def validate_ifa_params(p):
         ("ifa_e",ifa_e),("ifa_e2",ifa_e2),("ifa_te",ifa_te),("via_size",via_size),
         ("board_wsub",board_wsub),("board_hsub",board_hsub),("board_th",board_th),
         ("mifa_meander",mifa_meander),("mifa_meander_edge_distance",mifa_meander_edge_distance),("mifa_tipdistance",mifa_meander_edge_distance),
-        ("f1",f1),("f0",f0),("f2",f2),("mesh_boundry_size_divisor",mesh_boundry_size_divisor),
+        ("f1",f1),("f0",f0),("f2",f2),("mesh_boundary_size_divisor",mesh_boundary_size_divisor),
         ("mesh_wavelength_fraction",mesh_wavelength_fraction),("lambda_scale",lambda_scale)
     ]:
         if val <= 0:
@@ -73,8 +73,8 @@ def validate_ifa_params(p):
     # Mesh sanity bounds
     if not (0.05 <= mesh_wavelength_fraction <= 1.0):
         warnings.append(f"mesh_wavelength_fraction={mesh_wavelength_fraction:.3g} is unusual; typical ~0.1–0.5.")
-    if not (0.1 <= mesh_boundry_size_divisor <= 2.0):
-        warnings.append(f"mesh_boundry_size_divisor={mesh_boundry_size_divisor:.3g} is unusual; typical ~0.2–1.0.")
+    if not (0.1 <= mesh_boundary_size_divisor <= 2.0):
+        warnings.append(f"mesh_boundary_size_divisor={mesh_boundary_size_divisor:.3g} is unusual; typical ~0.2–1.0.")
     if not (0.25 <= lambda_scale <= 2.0):
         warnings.append(f"lambda_scale={lambda_scale:.3g} outside common 0.5–1.0 range.")
 
@@ -205,7 +205,7 @@ if __name__ == "__main__":
         "f0": 800000000.0,
         "f2": 900000000.0,
         "freq_points": 3,
-        "mesh_boundry_size_divisor": 0.5,
+        "mesh_boundary_size_divisor": 0.5,
         "mesh_wavelength_fraction": 0.5,
         "lambda_scale": 0.5,
         "clearance": 0.0003,
@@ -231,7 +231,7 @@ if __name__ == "__main__":
         "f0": 826000000.0,
         "f2": 862000000.0,
         "freq_points": 3.0,
-        "mesh_boundry_size_divisor": 0.5,
+        "mesh_boundary_size_divisor": 0.5,
         "mesh_wavelength_fraction": 0.5,
         "lambda_scale": 0.5,
         "clearance": 0.0003,

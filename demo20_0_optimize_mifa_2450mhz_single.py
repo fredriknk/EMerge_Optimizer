@@ -55,7 +55,7 @@ parameters = {
     'f0': 2.45e9,
     'f2': 2.5e9,
     'freq_points': 3,
-    'mesh_boundry_size_divisor': 0.4,
+    'mesh_boundary_size_divisor': 0.4,
     'mesh_wavelength_fraction': 0.4,
     'lambda_scale': 0.5,
 }
@@ -89,7 +89,7 @@ def main():
     p['freq_points'] = 3
     p['lambda_scale'] = 1.0
     p['mesh_wavelength_fraction'] = 0.20
-    p['mesh_boundry_size_divisor'] = 0.33
+    p['mesh_boundary_size_divisor'] = 0.33
 
     best_params, result, summary = run_stage(
         f"{SIMULATION_NAME}_refine2",
