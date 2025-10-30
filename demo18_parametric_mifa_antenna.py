@@ -1,6 +1,7 @@
 import emerge as em
 import numpy as np
-from ifalib import build_mifa, get_s11_at_freq, get_loss_at_freq
+from ifalib import build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency
+from optimize_lib import _fmt_params_singleline_raw
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
 
 """ PATCH ANTENNA DEMO
@@ -39,63 +40,13 @@ mm = 0.001              # meters per millimeter
 
 # --- Antenna geometry dimensions ----------------------------------------
 
-ifa = {
-    'ifa_h': 6.0*mm,
-    'ifa_l': 19.09*mm,
-    'ifa_w1': 0.7*mm,
-    'ifa_w2': 0.705*mm,
-    'ifa_wf': 0.7*mm,
-    'ifa_fp': 2*mm,
-    'ifa_e': 0.5*mm,
-    'ifa_e2': 0.5*mm,
-    'ifa_te': 0.5*mm,
-    'via_size': 0.5*mm,
-    'board_wsub': 21*mm,# substrate width
-    'board_hsub': 89.4*mm, # substrate length
-    'board_th': 1.5*mm, # substrate thickness
-    'mifa_meander': 2*mm,
-    'mifa_meander_edge_distance': 2*mm,
-    'mifa_tipdistance': 2*mm,
-    'f1': 2.3e9,
-    'f0': 2.45e9,
-    'f2': 2.6e9,
-    'freq_points': 3,
-    'mesh_boundry_size_divisor': 0.33,
-    'mesh_wavelength_fraction': 0.2,
-}
-
-mifa = {
-    'ifa_h': 6.0*mm,
-    'ifa_l': 26*mm,
-    'ifa_w1': 0.619*mm,
-    'ifa_w2': 0.5*mm,
-    'ifa_wf': 0.5*mm,
-    'ifa_fp': 2*mm,
-    'ifa_e': 0.5*mm,
-    'ifa_e2': 7*mm,
-    'ifa_te': 0.5*mm,
-    'via_size': 0.5*mm,
-    'board_wsub': 21*mm,# substrate width
-    'board_hsub': 40*mm, # substrate length
-    'board_th': 1.5*mm, # substrate thickness
-    'mifa_meander': 2*mm,
-    'mifa_meander_edge_distance':3*mm,
-    'mifa_tipdistance':3*mm,
-    'f1': 2.3e9,
-    'f0': 2.45e9,
-    'f2': 2.6e9,
-    'freq_points': 3,
-    'mesh_boundry_size_divisor': 0.4,
-    'mesh_wavelength_fraction': 0.4,
-}
-
-mifa_21x90_2_45ghz = {
+mifa_21x90_2450mhz = {
     'board_wsub': 0.021, 
     'board_th': 0.0015,
     'f0': 2.45e+09, 
     'f1': 2.3e+09, 
     'f2': 2.6e+09, 
-    'freq_points': 3, 
+    'freq_points': 5, 
     'board_hsub': 0.09, 
     'ifa_e': 0.0005, 
     'ifa_e2': 0.000575394784, 
@@ -114,13 +65,45 @@ mifa_21x90_2_45ghz = {
     'via_size': 0.0005,  
     'lambda_scale': 1 }
 
-parameters = mifa_21x90_2_45ghz
+mifa_14x25_2450mhz = { 
+    'ifa_h': 0.00773189309, 'ifa_l': 0.0229509148, 
+    'ifa_w1': 0.000766584703, 'ifa_w2': 0.000440876843, 'ifa_wf': 0.000344665757, 
+    'ifa_fp': 0.00156817497, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
+    'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 
+    'mifa_meander': 0.00195527223, 'mifa_meander_edge_distance': 0.00217823618, 
+    'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.7e+09, 'freq_points': 5, 
+    'mesh_boundry_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
+
+parameters = mifa_14x25_2450mhz
+parameters = mifa_21x90_2450mhz
 
 model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
-                                                   view_mesh=True, view_model=True,run_simulation=True,compute_farfield=False,
-                                                   loglevel="INFO",solver=em.EMSolver.CUDSS)
+                                                   view_mesh=True, view_model=True,run_simulation=True,compute_farfield=True,
+                                                   loglevel="INFO",solver=em.EMSolver.CUDSS,validate_ifa_antenna=True)
 
 if S11 is not None:
+    print(_fmt_params_singleline_raw(parameters))
+    RL_dB = -20*np.log10(np.abs(S11))
+    idx_min = np.argmax(RL_dB)
+    f_resonant = freq_dense[idx_min]
+
+    print(f"idx_min: {idx_min}, rl_min: {RL_dB[idx_min]:.2f} dB at f_resonant: {f_resonant/1e9:.4f} GHz")
     print(f"S11 at f0 frequency {parameters['f0'] / 1e9} GHz: {get_s11_at_freq(S11, parameters['f0'], freq_dense)} dB")
     print(f"S11 return loss (dB) at {parameters['f0']/1e9} GHz: {get_loss_at_freq(S11, parameters['f0'], freq_dense)} dB")
+    print(f"Resonant frequency (min |S11|): {get_resonant_frequency(S11, freq_dense)/1e9} GHz")
+    print(f"RL_DB_ARRAY: {RL_dB}")
+    print(f"S11 Array: {S11}")
+    print(f"Frequency Dense array: {freq_dense}")
     plot_sp(freq_dense, S11)                       # plot return loss in dB
+    smith(S11, f=freq_dense, labels='S11',markers="x")         # Smith chart of S11
+
+    
+    # --- Far-field radiation pattern ----------------------------------------
+    # Extract 2D cut at phi=0 plane and plot E-field magnitude
+
+if ff1 is not None and ff2 is not None:
+    plot_ff(ff1.ang*180/np.pi, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
+    plot_ff_polar(ff1.ang, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, dBfloor=-20)          # polar plot of radiation
+    surf = ff3d.surfplot('normE', rmax=60 * mm)
+    model.display.add_surf(*surf)
+    model.display.show()

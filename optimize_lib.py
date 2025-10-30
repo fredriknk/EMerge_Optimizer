@@ -873,3 +873,117 @@ def local_pattern_search_ifa(
         "rounds": int(rounds),
     }
     return best_params, summary
+
+
+from typing import Dict, Tuple, Optional
+import numpy as np
+from dataclasses import dataclass
+
+def local_minimize_ifa(
+    start_parameters: Dict[str, float],
+    optimize_parameters: Dict[str, Tuple[float, float]],
+    *,
+    method: str = "Powell",              # "Powell" or "Nelder-Mead"
+    init_step_mm: float = 0.10,          # initial step ~0.10 mm per variable
+    maxiter: int = 200,
+    ftol: float = 1e-4,
+    xtol: float = 1e-4,
+    bandwidth_target_db: Optional[float] = None,
+    bandwidth_span: Optional[Tuple[float, float]] = None,
+    solver_name: str = "CUDSS",
+    timeout: float = 600.0,
+    stage_name: str = "scipy_local"
+):
+    """
+    Small-step local optimizer starting at start_parameters.
+    - method="Powell": direction-set / line-search (bounded).
+    - method="Nelder-Mead": simplex around x0 (bounded).
+    init_step_mm controls the initial local step size.
+    """
+    from scipy.optimize import minimize, Bounds
+
+    logger = OptLogger(enabled=True)
+    mm = 1e-3
+
+    bounds_m = _ensure_bounds_in_meters(optimize_parameters)
+    var_keys = list(bounds_m.keys())
+
+    # Build objective with your existing machinery
+    objective, _ = _objective_factory(
+        start_parameters, bounds_m, logger=logger, log_every_eval=False,
+        bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
+        solver_name=solver_name, timeout=timeout,
+        maxiter_hint=None, popsize_hint=None, stage_name=stage_name
+    )
+
+    # Seed vector (clamped)
+    x0 = np.array([np.clip(start_parameters[k], *bounds_m[k]) for k in var_keys], dtype=float)
+
+    # Bounds object for SciPy
+    lo = np.array([bounds_m[k][0] for k in var_keys], dtype=float)
+    hi = np.array([bounds_m[k][1] for k in var_keys], dtype=float)
+    sbounds = Bounds(lo, hi, keep_feasible=True)
+
+    # Initial step sizing (meters)
+    step = float(init_step_mm) * mm
+    # Scale steps relative to each variable span so “small” is meaningful everywhere
+    spans = np.maximum(hi - lo, 1e-9)
+    dvec  = np.minimum(step, 0.25 * spans)   # don’t jump more than 25% of span
+
+    options = dict(maxiter=maxiter, xtol=xtol, ftol=ftol, maxfev=None)
+
+    # Method-specific seeding for small local moves
+    m = method.lower()
+    if m == "nelder-mead":
+        # Build a tiny simplex around x0 using dvec
+        initial_simplex = [x0]
+        for i in range(len(var_keys)):
+            v = x0.copy()
+            v[i] = np.clip(v[i] + dvec[i], lo[i], hi[i])
+            initial_simplex.append(v)
+        options["initial_simplex"] = np.vstack(initial_simplex)
+    elif m == "powell":
+        # Powell allows custom initial directions via 'direc'
+        # Use scaled coordinate directions with size dvec
+        n = len(var_keys)
+        direc = np.eye(n)
+        for i in range(n):
+            direc[i, i] = dvec[i] if dvec[i] > 0 else 1e-6
+        options["direc"] = direc
+
+    logger.info(f"[{stage_name}] starting {method} from current best, step≈{init_step_mm} mm")
+
+    res = minimize(
+        fun=objective,
+        x0=x0,
+        method=method,
+        bounds=sbounds,
+        options=options,
+    )
+
+    x_best = np.clip(res.x, lo, hi)
+    best_params = _pack_params(start_parameters, var_keys, x_best)
+
+    # Final verification run (your usual epilogue)
+    from ifalib import build_mifa, get_loss_at_freq
+    import emerge as em
+    solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
+    model, S11, freq_dense, *_ = build_mifa(
+        best_params, view_model=False, run_simulation=True, compute_farfield=False, solver=solver_enum
+    )
+    rl_best = get_loss_at_freq(S11, best_params['f0'], freq_dense)
+
+    logger.info(f"[{stage_name}] {method} done: fun={float(res.fun):.6f} "
+                f"RL@f0={rl_best:.2f} dB, iters={res.nit}, fev={res.nfev}, success={res.success}")
+
+    summary = {
+        "method": method,
+        "best_return_loss_dB_at_f0": float(rl_best),
+        "best_params": {k: float(best_params[k]) for k in best_params},
+        "optimizer_success": bool(res.success),
+        "optimizer_fun": float(res.fun),
+        "optimizer_message": str(res.message),
+        "nit": int(res.nit),
+        "nfev": int(res.nfev),
+    }
+    return best_params, summary

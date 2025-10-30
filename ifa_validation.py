@@ -102,7 +102,7 @@ def validate_ifa_params(p):
     # --- Your specific meander rules ---
 
     # 1) "mifa_meander < 2*w2 will be too small"
-    if mifa_meander < 2*ifa_w2 + clearance:
+    if mifa_meander < 2*ifa_w2 + clearance and ifa_l > board_wsub - ifa_e - ifa_e2:
         errors.append(f"mifa_meander={mifa_meander*1e3:.2f} mm is < 2*w2 + clearance={(2*ifa_w2+clearance)*1e3:.4f} mm (too small for a useful meander).")
 
     # 2) "if mifa_meander_edge_distance or mifa_tipdistance is larger than ifa_h-w2 it won't meander"
