@@ -36,7 +36,7 @@ Note: ifa_l is total length including meanders and tip
 """
 
 parameters = { 
-    'ifa_h': 10.0*mm,
+    'ifa_h': 20.0*mm,
     'ifa_l': 100*mm,
     'ifa_w1': 0.619*mm,
     'ifa_w2': 0.5*mm,
@@ -59,32 +59,6 @@ parameters = {
     'mesh_boundry_size_divisor': 0.4,
     'mesh_wavelength_fraction': 0.4,
     'lambda_scale': 0.5,
-}
-
-parameters = {
-  "ifa_h": 0.026721961022660216,
-  "ifa_l": 0.13516767907510804,
-  "ifa_w1": 0.0007747970923122423,
-  "ifa_w2": 0.0008121799266081413,
-  "ifa_wf": 0.0012112860858232545,
-  "ifa_fp": 0.007857536003039053,
-  "ifa_e": 0.0005,
-  "ifa_e2": 0.0005,
-  "ifa_te": 0.0005,
-  "via_size": 0.0005,
-  "board_wsub": 0.03,
-  "board_hsub": 0.11,
-  "board_th": 0.0015,
-  "mifa_meander": 0.002,
-  "mifa_meander_edge_distance": 0.003,
-  "f1": 791000000.0,
-  "f0": 826000000.0,
-  "f2": 862000000.0,
-  "freq_points": 3.0,
-  "mesh_boundry_size_divisor": 0.5,
-  "mesh_wavelength_fraction": 0.5,
-  "lambda_scale": 0.5,
-  "clearance": 0.0003,
 }
 
 
@@ -113,52 +87,18 @@ def main():
     p = dict(parameters)
     bounds = dict(BASE_BOUNDS)
 
-    # ----------------- Stage 0: Quicksearch (very fast & coarse) -----------------
-    # Coarse mesh / fewer points / modest λ_scaling
     p['freq_points'] = 3
-    p['lambda_scale'] = 0.5
-    p['mesh_wavelength_fraction'] = 0.50
-    p['mesh_boundry_size_divisor'] = 0.50
-
-    run_stage(
-        f"{SIMULATION_NAME}_quick",
-        p, bounds,
-        maxiter=4, popsize=20, seed=99,
-        solver_name=SOLVER, timeout=120.0,
-        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=False, log_every_eval=False
-    )
-
-    # ----------------- Stage 1: Refine (narrow bounds, better mesh) --------------
-    bounds = shrink_bounds_around_best(p, bounds, shrink=0.35, min_span_mm=0.05)
-    p['freq_points'] = 3
-    p['lambda_scale'] = 0.7
-    p['mesh_wavelength_fraction'] = 0.30
-    p['mesh_boundry_size_divisor'] = 0.40
-
-    run_stage(
-        f"{SIMULATION_NAME}_refine1",
-        p, bounds,
-        maxiter=8, popsize=6, seed=2,
-        solver_name=SOLVER, timeout=150.0,
-        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=True, log_every_eval=False
-    )
-
-    # ----------------- Stage 2: Refine deeper (tight bounds, denser sweep) -------
-    bounds = shrink_bounds_around_best(p, bounds, shrink=0.30, min_span_mm=0.03)
-    p['freq_points'] = 5
     p['lambda_scale'] = 1.0
     p['mesh_wavelength_fraction'] = 0.20
     p['mesh_boundry_size_divisor'] = 0.33
 
     best_params, result, summary = run_stage(
-        f"{SIMULATION_NAME}_refine2",
+        f"{SIMULATION_NAME}_broad",
         p, bounds,
-        maxiter=10, popsize=4, seed=3,
-        solver_name=SOLVER, timeout=180.0,
-        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
-        include_start=True, log_every_eval=False
+        maxiter=3, popsize=100, seed=1,
+        solver_name=SOLVER, timeout=200.0,
+        bandwidth_target_db=-11.0, bandwidth_span=(p['f1'], p['f2']),
+        include_start=False, log_every_eval=True
     )
 
     # Done: save final winner, print compact line again
