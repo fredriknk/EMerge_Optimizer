@@ -892,7 +892,8 @@ def local_minimize_ifa(
     bandwidth_span: Optional[Tuple[float, float]] = None,
     solver_name: str = "CUDSS",
     timeout: float = 600.0,
-    stage_name: str = "scipy_local"
+    log_every_eval: bool = False,
+    stage_name: str = "scipy_local",
 ):
     """
     Small-step local optimizer starting at start_parameters.
@@ -910,7 +911,7 @@ def local_minimize_ifa(
 
     # Build objective with your existing machinery
     objective, _ = _objective_factory(
-        start_parameters, bounds_m, logger=logger, log_every_eval=False,
+        start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
         bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
         solver_name=solver_name, timeout=timeout,
         maxiter_hint=None, popsize_hint=None, stage_name=stage_name

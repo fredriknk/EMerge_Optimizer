@@ -35,7 +35,7 @@ the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 Note: ifa_l is total length including meanders and tip
 """
 # Initial parameters - start point for optimization
-parameters={ 'ifa_h': 0.00789656661, 'ifa_l': 0.0229509148, 'ifa_w1': 0.000766584703, 'ifa_w2': 0.000440876843, 'ifa_wf': 0.000344665757, 'ifa_fp': 0.00156817497, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 'mifa_meander': 0.00195527223, 'mifa_meander_edge_distance': 0.00217823618, 'f1': 2.4e+09, 'f0': 2.45e+09, 'f2': 2.5e+09, 'freq_points': 3, 'mesh_boundry_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
+
 parameters = mifa_14x25_2450mhz = { 
     'ifa_h': 0.00773189309, 'ifa_l': 0.0229509148, 
     'ifa_w1': 0.000766584703, 'ifa_w2': 0.000440876843, 'ifa_wf': 0.000344665757, 
@@ -44,7 +44,6 @@ parameters = mifa_14x25_2450mhz = {
     'mifa_meander': 0.00195527223, 'mifa_meander_edge_distance': 0.00217823618, 
     'f1': 2.4e+09, 'f0': 2.45e+09, 'f2': 2.5e+09, 'freq_points': 3, 
     'mesh_boundry_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
-
 
 epsilon_r = 4.4  # FR4 typical
 calc_wavelength_at_2_45ghz = (3e8 / 2.45e9)*epsilon_r**0.5
@@ -63,15 +62,18 @@ for k in list(parameters.keys()):
 SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
-SIMULATION_NAME = "mifa_2400mhz_optimization_single"
+SIMULATION_NAME = "mifa_2400mhz_optimization_incremental"
 
 def main():
     # Keep an independent copy we can mutate stage-by-stage
     p = dict(parameters)
     bounds = base_bounds
-    p['f1'] = p['f0']
-    p['f2'] = p['f0']
-    p['freq_points'] = 1
+    p['freq_points'] = 3
+    p['f1'] = 2.4e+09
+    p['f2'] = 2.5e+09
+    #p['f1'] = p['f0'] # Uncomment theese for pure s11 optimization
+    #p['f2'] = p['f0']
+    #p['freq_points'] = 1
     p['lambda_scale'] = 1.0
     p['mesh_wavelength_fraction'] = 0.20
     p['mesh_boundry_size_divisor'] = 0.33
@@ -82,15 +84,17 @@ def main():
         optimize_parameters=bounds,      # bounds (meters)
         method="Powell",                         # or "Nelder-Mead"
         init_step_mm=0.05,                       # “small step” knob
-        maxiter=120,
-        #bandwidth_target_db=10.0,               # Comment out to disable bandwidth goal
-        #bandwidth_span=(p['f1'], p['f2']),      # Comment out to disable bandwidth goal
+        maxiter=1000,
+        bandwidth_target_db=10.0,               # Comment out to disable bandwidth goal
+        bandwidth_span=(p['f1'], p['f2']),      # Comment out to disable bandwidth goal
         solver_name="CUDSS",
-        stage_name="powell_local"
+        stage_name=SIMULATION_NAME,
+        log_every_eval=True,
     )
 
     # Done: save final winner, print compact line again
-    write_json("best_params.json", best_local)
+    os.makedirs("best_params_log", exist_ok=True)
+    write_json(f"best_params_log/best_params_{SIMULATION_NAME}.json", best_local)
     print("\n=== FINAL WINNER ===")
     print(_fmt_params_singleline_raw(best_local, sort_keys=False))
 
