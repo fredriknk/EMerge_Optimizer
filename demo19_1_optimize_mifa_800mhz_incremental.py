@@ -64,13 +64,13 @@ def main():
         bw_span = (p['f1'], p['f2'])
         bw_target_db = 10.0
         bandwidth_parameters = {
-            "mean_excess_weight": 1.0,      #Average excess reflection weight
+            "mean_excess_weight": 1.0,      #Average excess reflection weight (over target) bandwidth fullfillment = 0.0
             "center_weighting_factor": 0.0, #Center frequency reflection weight
             "mean_power_weight": 0.0,       #Mean power reflection weight   
             "max_excess_factor": 0.0,       #lowest-case excess reflection weight
         }
-        
         p['freq_points'] = 3
+
     else: # S11_OPTIMIZE
         bw_span = None
         bw_target_db = None
@@ -80,9 +80,9 @@ def main():
         p['freq_points'] = 1
     
     
-    p['lambda_scale'] = 1.0
-    p['mesh_wavelength_fraction'] = 0.20
-    p['mesh_boundry_size_divisor'] = 0.33
+    p['lambda_scale'] = 0.5
+    p['mesh_wavelength_fraction'] = 0.4
+    p['mesh_boundry_size_divisor'] = 0.5
 
 
     best_local, sum_local = local_minimize_ifa(
