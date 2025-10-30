@@ -351,7 +351,7 @@ def get_bandwidth(S11, freq_dense, rl_threshold_dB=10.0, f0=None):
     # Find indices where RL crosses threshold
     indices_below = np.where(RL_dB <= -rl_threshold_dB)[0]
     if len(indices_below) == 0:
-        return 0.0  # No bandwidth found
+        return [0.0, 0.0]  # No bandwidth found
 
     # Find closest points below threshold on either side of f0
     freqs_below = freq_dense[indices_below]
@@ -359,7 +359,7 @@ def get_bandwidth(S11, freq_dense, rl_threshold_dB=10.0, f0=None):
     right_indices = indices_below[freqs_below > f0]
 
     if len(left_indices) == 0 or len(right_indices) == 0:
-        return 0.0  # No valid bandwidth found
+        return [0.0, 0.0]  # No valid bandwidth found
 
     f_left = freq_dense[left_indices[-1]]
     f_right = freq_dense[right_indices[0]]

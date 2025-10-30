@@ -360,7 +360,10 @@ def _objective_factory(
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
     solver_name: str = "PARDISO", timeout: float = 600.0, maxiter_hint: int = None, popsize_hint: int = None,
-    stage_name: str = "default"):
+    stage_name: str = "default",
+    bandwidth_parameters: Optional[Dict[str, float]] = None,
+    ):
+    
     var_keys = list(var_bounds_m.keys())
     state = {
         "evals": 0,
@@ -480,21 +483,27 @@ def _objective_factory(
             if band_width <= 0.0:
                 return float(penalty_if_fail)
 
+            mean_excess_weight = 1.0  # default
+            mean_excess_weight = bandwidth_parameters.get("mean_excess_weight", mean_excess_weight)
             mean_excess = float(np.trapz(excess, freq[m]) / band_width)
 
             # Robustness: small worst-case term to suppress narrow spikes
-            alpha = 0.2  # tune 0.1–0.3
+            max_excess_factor = 0.2  # tune 0.1–0.3
+            max_excess_factor = bandwidth_parameters.get("max_excess_factor", max_excess_factor)
+            
             max_excess = float(np.max(excess))
 
             # Optional center weighting (very light)
-            beta = 0.2   # set 0.0 to disable
+            center_weighting_factor = 0.2   # set 0.0 to disable
+            center_weighting_factor = bandwidth_parameters.get("center_weighting_factor", center_weighting_factor)
             ex0 = float(max(_gamma_from_rl_pos_db([abs(rl_f0)])[0] - g_t, 0.0))
 
             # Gentle preference for deeper-than-target match (smaller |Γ|^2)
-            mean_power = float(np.trapz(gamma2, freq[m]) / band_width)   # average |Γ|^2 over band
-            eta = 0.1  # small weight; tune ~0.01–0.1
+            mean_power = float(np.trapezoid(gamma2, freq[m]) / band_width)   # average |Γ|^2 over band
+            mean_power_weight = 0.1  # small weight; tune ~0.01–0.1
+            mean_power_weight = bandwidth_parameters.get("mean_power_weight", mean_power_weight)
 
-            obj = mean_excess + alpha * max_excess + beta * ex0 + eta * (mean_power / g2_t)  # minimize
+            obj = mean_excess_weight * mean_excess + max_excess_factor * max_excess + center_weighting_factor * ex0 + mean_power_weight * (mean_power / g2_t)  # minimize
 
             # Logging aids (meeting spec means RL[dB] <= -rl_target)
             rl_spec_db = -rl_target
@@ -894,6 +903,7 @@ def local_minimize_ifa(
     timeout: float = 600.0,
     log_every_eval: bool = False,
     stage_name: str = "scipy_local",
+    bandwidth_parameters: Optional[Dict[str, float]] = None
 ):
     """
     Small-step local optimizer starting at start_parameters.
@@ -914,7 +924,8 @@ def local_minimize_ifa(
         start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
         bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
         solver_name=solver_name, timeout=timeout,
-        maxiter_hint=None, popsize_hint=None, stage_name=stage_name
+        maxiter_hint=None, popsize_hint=None, stage_name=stage_name,
+        bandwidth_parameters=bandwidth_parameters
     )
 
     # Seed vector (clamped)

@@ -63,17 +63,32 @@ SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
 SIMULATION_NAME = "mifa_2400mhz_optimization_incremental"
+OPTIMIZATION_MODE = "BW_OPTIMIZE"
 
 def main():
-    # Keep an independent copy we can mutate stage-by-stage
     p = dict(parameters)
-    bounds = base_bounds
-    p['freq_points'] = 3
-    p['f1'] = 2.4e+09
-    p['f2'] = 2.5e+09
-    #p['f1'] = p['f0'] # Uncomment theese for pure s11 optimization
-    #p['f2'] = p['f0']
-    #p['freq_points'] = 1
+    bounds = dict(base_bounds)
+    
+    if OPTIMIZATION_MODE == "BW_OPTIMIZE":
+        bw_span = (p['f1'], p['f2'])
+        bw_target_db = 10.0
+        bandwidth_parameters = {
+            "mean_excess_weight": 1.0,      #Average excess reflection weight
+            "max_excess_factor": 0.1,       #lowest-case excess reflection weight
+            "center_weighting_factor": 0.05, #Center frequency reflection weight
+            "mean_power_weight": 0.025,       #Mean power reflection weight    
+        }
+        
+        p['freq_points'] = 3
+    else: # S11_OPTIMIZE
+        bw_span = None
+        bw_target_db = None
+        bandwidth_parameters = None
+        p['f1'] = p['f0'] 
+        p['f2'] = p['f0']
+        p['freq_points'] = 1
+    
+    
     p['lambda_scale'] = 1.0
     p['mesh_wavelength_fraction'] = 0.20
     p['mesh_boundry_size_divisor'] = 0.33
