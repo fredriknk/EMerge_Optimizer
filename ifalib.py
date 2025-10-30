@@ -343,6 +343,31 @@ def get_resonant_frequency(S11, freq_dense):
     f_resonant = freq_dense[idx_min]
     return f_resonant
 
+def get_bandwidth(S11, freq_dense, rl_threshold_dB=10.0, f0=None):
+    """Get bandwidth (Hz) at given return loss threshold (dB) arouind f0"""
+    RL_dB = -20*np.log10(np.abs(S11))
+    if f0 is None:
+        f0 = get_resonant_frequency(S11, freq_dense)
+    # Find indices where RL crosses threshold
+    indices_below = np.where(RL_dB <= -rl_threshold_dB)[0]
+    if len(indices_below) == 0:
+        return 0.0  # No bandwidth found
+
+    # Find closest points below threshold on either side of f0
+    freqs_below = freq_dense[indices_below]
+    left_indices = indices_below[freqs_below < f0]
+    right_indices = indices_below[freqs_below > f0]
+
+    if len(left_indices) == 0 or len(right_indices) == 0:
+        return 0.0  # No valid bandwidth found
+
+    f_left = freq_dense[left_indices[-1]]
+    f_right = freq_dense[right_indices[0]]
+
+    bandwidth = np.array([f_left,f_right])
+    return bandwidth
+
+
 def get_s11_at_freq(S11,f0,freq_dense):
     """Get S11 complex value at center frequency."""
     # If you need to interpolate complex S11 first, do real & imag separately:

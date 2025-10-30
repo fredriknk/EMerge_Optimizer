@@ -63,6 +63,7 @@ parameters = {
 epsilon_r = 4.4  # FR4 typical
 calc_wavelength_at_2_45ghz = (3e8 / 2.45e9)*epsilon_r**0.5
 # IMPORTANT: set bounds in METERS
+# Set min and max for each parameter to be optimized
 BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
     'ifa_h':  (3.0*mm, 8.0*mm),
     'ifa_l':  (17*mm,   36*mm),
@@ -93,9 +94,9 @@ def main():
     best_params, result, summary = run_stage(
         f"{SIMULATION_NAME}_refine2",
         p, bounds,
-        maxiter=10, popsize=30, seed=4,
+        maxiter=3, popsize=100, seed=1,
         solver_name=SOLVER, timeout=200.0,
-        bandwidth_target_db=-10.0, bandwidth_span=(p['f1'], p['f2']),
+        bandwidth_target_db=-11.0, bandwidth_span=(p['f1'], p['f2']),
         include_start=False, log_every_eval=True
     )
 
