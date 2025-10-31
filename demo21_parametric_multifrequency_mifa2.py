@@ -9,22 +9,22 @@ from ifalib2 import AntennaParams, build_mifa
 
 params ={
     "p": {
-        'board_wsub': 0.021, 
+        'board_wsub': 0.0191, 
         'board_th': 0.0015,
         'f0': 2.5e+09, 
         'f1': 2.0e+09, 
         'f2': 3.0e+09, 
-        'freq_points': 5, 
+        'freq_points': 10,
         'board_hsub': 0.09, 
         'ifa_e': 0.0005, 
         'ifa_e2': 0.000575394784, 
-        'ifa_fp': 0.00378423695, 
+        'ifa_fp': 0.0045, 
         'ifa_h': 0.00790411482, 
         'ifa_l': 0.020, 
         'ifa_te': 0.0005, 
-        'ifa_w1': 0.000550173526, 
+        'ifa_w1': 0.0005, 
         'ifa_w2': 0.001, 
-        'ifa_wf': 0.000433478781, 
+        'ifa_wf': 0.0005, 
         'mesh_boundary_size_divisor': 0.33,
         'mesh_wavelength_fraction': 0.2, 
         'mifa_meander': 0.001*2+0.0003, 
@@ -34,17 +34,17 @@ params ={
         'lambda_scale': 1 
     },
     "p2" : {
-        "ifa_l":0.019,
+        "ifa_l":0.021,
         "ifa_h":"${p.mifa_low_dist}- 0.0005",
         "ifa_e":"${p.ifa_fp}",
-        "ifa_w2":0.0005,
+        "ifa_w2":0.0006,
         "mifa_meander":"${p2.ifa_w2}*2+0.0003",
         "mifa_low_dist":"${p.mifa_low_dist} - 0.002",
         "mifa_tipdistance":"${p2.mifa_low_dist}",
         "shunt":False,
     },
     "p3": {
-        "ifa_l":0.021,
+        "ifa_l":0.0191,
         "ifa_h":"${p2.mifa_low_dist}- 0.0005",
         "ifa_e":"(${p.ifa_e2}+${p.ifa_fp})/2",
         "ifa_w2":0.0006,
@@ -60,8 +60,8 @@ parameters = params
 if __name__=="__main__":
     
     model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
-                                                   view_mesh=True, view_model=True,
-                                                   run_simulation=True,compute_farfield=True,
+                                                   view_mesh=False, view_model=False,
+                                                   run_simulation=True,compute_farfield=False,
                                                    loglevel="INFO",solver=em.EMSolver.CUDSS)
     
     print(f"Main Antenna: {_fmt_params_singleline_raw(params)}")
