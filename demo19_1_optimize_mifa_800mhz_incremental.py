@@ -80,9 +80,9 @@ def main():
         p['freq_points'] = 1
     
     
-    p['lambda_scale'] = 0.5
-    p['mesh_wavelength_fraction'] = 0.4
-    p['mesh_boundary_size_divisor'] = 0.5
+    p['lambda_scale'] = 1.0
+    p['mesh_wavelength_fraction'] = 0.2
+    p['mesh_boundry_size_divisor'] = 0.33
 
 
     best_local, sum_local = local_minimize_ifa(
