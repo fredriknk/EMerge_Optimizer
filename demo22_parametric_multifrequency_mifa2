@@ -3,61 +3,70 @@ import numpy as np
 from ifalib import mm, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency,get_bandwidth
 from optimize_lib import _fmt_params_singleline_raw
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
-from ifalib2 import AntennaParams, build_dualfreq_mifa,build_multifreq_mifa
+from ifalib2 import AntennaParams, build_mifa
 
 
 
-mifa_21x90_2450mhz = {
-    'board_wsub': 0.021, 
-    'board_th': 0.0015,
-    'f0': 2.45e+09, 
-    'f1': 2.0e+09, 
-    'f2': 3.6e+09, 
-    'freq_points': 10, 
-    'board_hsub': 0.09, 
-    'ifa_e': 0.0005, 
-    'ifa_e2': 0.000575394784, 
-    'ifa_fp': 0.00378423695, 
-    'ifa_h': 0.00790411482, 
-    'ifa_l': 0.020, 
-    'ifa_te': 0.0005, 
-    'ifa_w1': 0.000550173526, 
-    'ifa_w2': 0.001, 
-    'ifa_wf': 0.000433478781, 
-    'mesh_boundary_size_divisor': 0.33,
-    'mesh_wavelength_fraction': 0.2, 
-    'mifa_meander': 0.001*2+0.0003, 
-    'mifa_meander_edge_distance': 0.003+0.0005, 
-    'mifa_tipdistance': 0.003, 
-    'via_size': 0.0005,  
-    'lambda_scale': 1 }
-
-p = mifa_21x90_2450mhz
-
-p2={"ifa_l":0.019,
-    "ifa_h":0.005,
-    "ifa_e":0.001,
-    "ifa_e2":0.01,
-    "ifa_w1":0.00055,
-    "ifa_w2":0.0005,
-    "mifa_meander":0.0005*2+0.0003,
-    "mifa_meander_edge_distance":0.001,
+params ={
+    "p": {
+        'board_wsub': 0.021, 
+        'board_th': 0.0015,
+        'f0': 2.5e+09, 
+        'f1': 2.0e+09, 
+        'f2': 3.0e+09, 
+        'freq_points': 5, 
+        'board_hsub': 0.09, 
+        'ifa_e': 0.0005, 
+        'ifa_e2': 0.000575394784, 
+        'ifa_fp': 0.00378423695, 
+        'ifa_h': 0.00790411482, 
+        'ifa_l': 0.020, 
+        'ifa_te': 0.0005, 
+        'ifa_w1': 0.000550173526, 
+        'ifa_w2': 0.001, 
+        'ifa_wf': 0.000433478781, 
+        'mesh_boundary_size_divisor': 0.33,
+        'mesh_wavelength_fraction': 0.2, 
+        'mifa_meander': 0.001*2+0.0003, 
+        'mifa_low_dist': "${p.ifa_h} - 0.002", 
+        'mifa_tipdistance': "${p.mifa_low_dist}", 
+        'via_size': 0.0005,  
+        'lambda_scale': 1 
+    },
+    "p2" : {
+        "ifa_l":0.019,
+        "ifa_h":"${p.mifa_low_dist}- 0.0005",
+        "ifa_e":"${p.ifa_fp}",
+        "ifa_w2":0.0005,
+        "mifa_meander":"${p2.ifa_w2}*2+0.0003",
+        "mifa_low_dist":"${p.mifa_low_dist} - 0.002",
+        "mifa_tipdistance":"${p2.mifa_low_dist}",
+        "shunt":False,
+    },
+    "p3": {
+        "ifa_l":0.021,
+        "ifa_h":"${p2.mifa_low_dist}- 0.0005",
+        "ifa_e":"(${p.ifa_e2}+${p.ifa_fp})/2",
+        "ifa_w2":0.0006,
+        "mifa_meander":"${p2.ifa_w2}*2+0.0005",
+        "mifa_low_dist":"${p2.mifa_low_dist} - 0.002",
+        "mifa_tipdistance":"${p3.mifa_low_dist}",
+        "shunt":True,
+    },
 }
 
-parameters = {"p": p, "p2": p2}
-parameters = p
+parameters = params
 
 if __name__=="__main__":
     
-    model, S11, freq_dense,ff1, ff2, ff3d = build_multifreq_mifa(parameters,
+    model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
                                                    view_mesh=True, view_model=True,
                                                    run_simulation=True,compute_farfield=True,
                                                    loglevel="INFO",solver=em.EMSolver.CUDSS)
     
-    print(f"Main Antenna: {_fmt_params_singleline_raw(p)}")
-    print(f"Auxiliary Antenna: {_fmt_params_singleline_raw(p2)}")
+    print(f"Main Antenna: {_fmt_params_singleline_raw(params)}")
     if S11 is not None:
-
+        p = parameters['p']
         RL_dB = -20*np.log10(np.abs(S11))
         idx_min = np.argmax(RL_dB)
         f_resonant = freq_dense[idx_min]

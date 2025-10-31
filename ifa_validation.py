@@ -13,7 +13,7 @@ def validate_ifa_params(p):
     req = [
         'ifa_h','ifa_l','ifa_w1','ifa_w2','ifa_wf','ifa_fp','ifa_e','ifa_e2','ifa_te',
         'via_size','board_wsub','board_hsub','board_th',
-        'mifa_meander','mifa_meander_edge_distance',
+        'mifa_meander','mifa_low_dist',
         'f1','f0','f2','freq_points',
         'mesh_boundary_size_divisor','mesh_wavelength_fraction','lambda_scale'
     ]
@@ -36,8 +36,8 @@ def validate_ifa_params(p):
     board_hsub    = float(p['board_hsub'])
     board_th      = float(p['board_th'])
     mifa_meander    = float(p['mifa_meander'])
-    mifa_meander_edge_distance   = float(p['mifa_meander_edge_distance'])
-    mifa_meander_tip_distance    = float(p.get('mifa_tipdistance', mifa_meander_edge_distance))
+    mifa_low_dist   = float(p['mifa_low_dist'])
+    mifa_meander_tip_distance    = float(p.get('mifa_tipdistance', mifa_low_dist))
     f1      = float(p['f1'])
     f0      = float(p['f0'])
     f2      = float(p['f2'])
@@ -56,7 +56,7 @@ def validate_ifa_params(p):
         ("ifa_h",ifa_h),("ifa_l",ifa_l),("ifa_w1",ifa_w1),("ifa_w2",ifa_w2),("ifa_wf",ifa_wf),("ifa_fp",ifa_fp),
         ("ifa_e",ifa_e),("ifa_e2",ifa_e2),("ifa_te",ifa_te),("via_size",via_size),
         ("board_wsub",board_wsub),("board_hsub",board_hsub),("board_th",board_th),
-        ("mifa_meander",mifa_meander),("mifa_meander_edge_distance",mifa_meander_edge_distance),("mifa_tipdistance",mifa_meander_edge_distance),
+        ("mifa_meander",mifa_meander),("mifa_low_dist",mifa_low_dist),("mifa_tipdistance",mifa_low_dist),
         ("f1",f1),("f0",f0),("f2",f2),("mesh_boundary_size_divisor",mesh_boundary_size_divisor),
         ("mesh_wavelength_fraction",mesh_wavelength_fraction),("lambda_scale",lambda_scale)
     ]:
@@ -105,11 +105,11 @@ def validate_ifa_params(p):
     if mifa_meander < 2*ifa_w2 + clearance and ifa_l > board_wsub - ifa_e - ifa_e2:
         errors.append(f"mifa_meander={mifa_meander*1e3:.2f} mm is < 2*w2 + clearance={(2*ifa_w2+clearance)*1e3:.4f} mm (too small for a useful meander).")
 
-    # 2) "if mifa_meander_edge_distance or mifa_tipdistance is larger than ifa_h-w2 it won't meander"
+    # 2) "if mifa_low_dist or mifa_tipdistance is larger than ifa_h-w2 it won't meander"
     vertical_room = ifa_h - ifa_w2
     derived["vertical_room_for_meander"] = vertical_room
-    if mifa_meander_edge_distance >= vertical_room:
-        errors.append(f"mifa_meander_edge_distance={mifa_meander_edge_distance*1e3:.2f} mm > ifa_h - w2={vertical_room*1e3:.2f} mm.")
+    if mifa_low_dist >= vertical_room:
+        errors.append(f"mifa_low_dist={mifa_low_dist*1e3:.2f} mm > ifa_h - w2={vertical_room*1e3:.2f} mm.")
     if mifa_meander_tip_distance >= vertical_room:
         errors.append(f"mifa_tipdistance={mifa_meander_tip_distance*1e3:.2f} mm > ifa_h - w2={vertical_room*1e3:.2f} mm.")
 
@@ -143,7 +143,7 @@ def validate_ifa_params(p):
     # Vertical packing estimate (very rough): if meanders alternate up/down with edge clearance (medge) and a top/bottom usable band ~ (ifa_h - w2)
     # You can refine this when your exact geometry is fixed.
     # Here we just assert there is at least some vertical room beyond the edge/tip distances.
-    if vertical_room <= max(mifa_meander_edge_distance, mifa_meander_tip_distance):
+    if vertical_room <= max(mifa_low_dist, mifa_meander_tip_distance):
         errors.append("Vertical room for meander paths is exhausted by edge/tip distances.")
 
     # Nice-to-have: guard tiny copper features
@@ -155,7 +155,7 @@ def validate_ifa_params(p):
     max_num_meanders = max_num_meanders-max_num_meanders%2  # make even
     derived["estimated_number_of_meanders_fit"] = int(max_num_meanders)
     ant_stub = board_wsub-ifa_e-ifa_e2-max_num_meanders*(mifa_meander)-ifa_w2
-    single_meander_length = ifa_h-mifa_meander_edge_distance
+    single_meander_length = ifa_h-mifa_low_dist
     tip_length = ifa_h - mifa_meander_tip_distance
     max_length = (max_num_meanders*(mifa_meander+single_meander_length-ifa_w2))+ tip_length + ant_stub
     derived["estimated_max_antenna_length_with_meanders"] = max_length
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     #| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
     #| V____          _______________     __________  | |  \_0 point
     #|               |    ___  ___   |___|  ______  | | |
-    #|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
+    #|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
     #|               |   |   ||     <----->      |__|_|_|_|
     #|               |   |   ||   mifa_meander    w2  | | |mifa_tipdistance(Optional, 
     #|_______________|___|___||_______________________| |_|will be set to edge distance if 0)
@@ -200,7 +200,7 @@ if __name__ == "__main__":
         "board_th": 0.0015,
         "mifa_meander": 0.002,
         #"mifa_tipdistance": 0.003,
-        "mifa_meander_edge_distance": 0.011,
+        "mifa_low_dist": 0.011,
         "f1": 700000000.0,
         "f0": 800000000.0,
         "f2": 900000000.0,
@@ -226,7 +226,7 @@ if __name__ == "__main__":
         "board_hsub": 0.11,
         "board_th": 0.0015,
         "mifa_meander": 1.9244e-03,
-        "mifa_meander_edge_distance": 0.003,
+        "mifa_low_dist": 0.003,
         "f1": 791000000.0,
         "f0": 826000000.0,
         "f2": 862000000.0,

@@ -38,7 +38,7 @@ def _precheck_params(p: dict):
     pos_keys = {
         "ifa_h","ifa_l","ifa_w1","ifa_w2","ifa_wf","ifa_fp","ifa_e","ifa_e2","ifa_te","via_size",
         "wsub","hsub","th","board_wsub","board_hsub","board_th",
-        "mifa_meander","mifa_meander_edge_distance","mifa_tipdistance"
+        "mifa_meander","mifa_low_dist","mifa_tipdistance"
     }
     for k in pos_keys:
         if k in p and not (float(p[k]) > 0.0):
@@ -113,7 +113,7 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
         def _precheck_params(p: dict):
             for k in ("ifa_h","ifa_l","ifa_w1","ifa_w2","ifa_wf","ifa_fp","ifa_e","ifa_e2","ifa_te",
                       "via_size","wsub","hsub","th","board_wsub","board_hsub","board_th",
-                      "mifa_meander","mifa_meander_edge_distance","mifa_tipdistance"):
+                      "mifa_meander","mifa_low_dist","mifa_tipdistance"):
                 if k in p and not (float(p[k]) > 0.0):
                     raise ValueError(f"{k} must be > 0 (got {p[k]!r})")
             hsub = p.get("hsub", p.get("board_hsub"))
@@ -271,7 +271,7 @@ def _safe_sim_rl_multi(
 
 _MM_KEYS = {
     'ifa_h','ifa_l','ifa_w1','ifa_w2','ifa_wf','ifa_fp','ifa_e','ifa_e2','ifa_te','via_size',
-    'board_wsub','board_hsub','board_th','mifa_meander','mifa_meander_edge_distance','mifa_tipdistance'
+    'board_wsub','board_hsub','board_th','mifa_meander','mifa_low_dist','mifa_tipdistance'
 }
 _FREQ_KEYS = {'f0','f1','f2'}
 

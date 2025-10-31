@@ -19,7 +19,7 @@ the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 #| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
 #| V____          _______________     __________  | |  \_0 point
 #|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
+#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
 #|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
 #|               |   |   ||                   w2  | | |                  
 #|_______________|___|___||_______________________| |_|
@@ -41,7 +41,7 @@ parameters = mifa_14x25_2450mhz = {
     'ifa_w1': 0.000766584703, 'ifa_w2': 0.000440876843, 'ifa_wf': 0.000344665757, 
     'ifa_fp': 0.00156817497, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
     'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 
-    'mifa_meander': 0.00195527223, 'mifa_meander_edge_distance': 0.00217823618, 
+    'mifa_meander': 0.00195527223, 'mifa_low_dist': 0.00217823618, 
     'f1': 2.4e+09, 'f0': 2.45e+09, 'f2': 2.5e+09, 'freq_points': 3, 
     'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
 
@@ -49,7 +49,7 @@ epsilon_r = 4.4  # FR4 typical
 calc_wavelength_at_2_45ghz = (3e8 / 2.45e9)*epsilon_r**0.5
 # IMPORTANT: set bounds in METERS
 
-tweak_parameters = ['ifa_h', 'ifa_l', 'ifa_w1', 'ifa_w2', 'ifa_wf', 'ifa_fp', 'mifa_meander_edge_distance', 'mifa_meander']
+tweak_parameters = ['ifa_h', 'ifa_l', 'ifa_w1', 'ifa_w2', 'ifa_wf', 'ifa_fp', 'mifa_low_dist', 'mifa_meander']
 
 base_bounds ={}
 #add parameter intervals +/- 10% around initial parameters

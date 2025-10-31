@@ -19,7 +19,7 @@ the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 #| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
 #| V____          _______________     __________  | |  \_0 point
 #|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
+#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
 #|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
 #|               |   |   ||                   w2  | | |                  
 #|_______________|___|___||_______________________| |_|
@@ -50,7 +50,7 @@ parameters = {
     'board_hsub': 110*mm,
     'board_th': 1.5*mm,
     'mifa_meander': 2*mm,
-    'mifa_meander_edge_distance': 3*mm,
+    'mifa_low_dist': 3*mm,
     'mifa_tipdistance': 3*mm,
     'f1': 0.7e9,
     'f0': 0.8e9,

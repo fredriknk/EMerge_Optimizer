@@ -33,8 +33,8 @@ def build_mifa_plates(
     
     # --- meander/tip geometry knobs ---
     mifa_meander = parameters['mifa_meander']             # horizontal meander step (x)
-    mifa_meander_edge_distance = parameters['mifa_meander_edge_distance']  # y-clearance from ground edge for meanders
-    mifa_tipdistance = parameters.get('mifa_tipdistance', mifa_meander_edge_distance)         # y-clearance for the tip element
+    mifa_low_dist = parameters['mifa_low_dist']  # y-clearance from ground edge for meanders
+    mifa_tipdistance = parameters.get('mifa_tipdistance', mifa_low_dist)         # y-clearance for the tip element
 
     mm = 0.001  # meters per millimeter
     plates = []
@@ -78,7 +78,7 @@ def build_mifa_plates(
     # Don't append yet; we may add tip/meanders first depending on branch
     length_diff = ifa_l - usable_x
 
-    max_length_mifa = ifa_h - mifa_meander_edge_distance-ifa_w2
+    max_length_mifa = ifa_h - mifa_low_dist-ifa_w2
     max_edgelength_tip = ifa_h - mifa_tipdistance-ifa_w2
 
     # --- Tip element branch ---
@@ -201,8 +201,8 @@ def build_mifa(p,
     via_size = p['via_size'] 
     mifa_meander = p['mifa_meander'] 
     
-    mifa_meander_edge_distance = p['mifa_meander_edge_distance'] 
-    mifa_tipdistance = p.get('mifa_tipdistance', mifa_meander_edge_distance)
+    mifa_low_dist = p['mifa_low_dist'] 
+    mifa_tipdistance = p.get('mifa_tipdistance', mifa_low_dist)
 
     board_wsub = p['board_wsub']          # substrate width
     board_hsub = p['board_hsub']          # substrate length

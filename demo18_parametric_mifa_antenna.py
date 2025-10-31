@@ -1,6 +1,7 @@
 import emerge as em
 import numpy as np
 from ifalib import build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency,get_bandwidth
+#from ifalib2 import AntennaParams, build_mifa
 from optimize_lib import _fmt_params_singleline_raw
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
 
@@ -20,7 +21,7 @@ This simulation is quite heavy and might take a while to fully compute.
 #| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
 #| V____          _______________     __________  | |  \_0 point
 #|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
+#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
 #|               |   |   ||     <----->      |__|_|_|_|
 #|               |   |   ||   mifa_meander    w2  | | |mifa_tipdistance(Optional, 
 #|_______________|___|___||_______________________| |_|will be set to edge distance if 0)
@@ -60,7 +61,7 @@ mifa_21x90_2450mhz = {
     'mesh_boundary_size_divisor': 0.33,
     'mesh_wavelength_fraction': 0.2, 
     'mifa_meander': 0.002, 
-    'mifa_meander_edge_distance': 0.003, 
+    'mifa_low_dist': 0.003, 
     'mifa_tipdistance': 0.003, 
     'via_size': 0.0005,  
     'lambda_scale': 1 }
@@ -70,7 +71,7 @@ mifa_14x25_2450mhz = {
     'ifa_w1': 0.000766584703, 'ifa_w2': 0.000440876843, 'ifa_wf': 0.000344665757, 
     'ifa_fp': 0.00156817497, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
     'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 
-    'mifa_meander': 0.00195527223, 'mifa_meander_edge_distance': 0.00217823618, 
+    'mifa_meander': 0.00195527223, 'mifa_low_dist': 0.00217823618, 
     'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.7e+09, 'freq_points': 5, 
     'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
 
@@ -79,15 +80,15 @@ mifa_30x110_821mhz = {
     'ifa_w1': 0.00045360957, 'ifa_w2': 0.000439352308, 'ifa_wf': 0.000411214503, 
     'ifa_fp': 0.00722339282, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
     'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 
-    'mifa_meander': 0.00169312729, 'mifa_meander_edge_distance': 0.003, 
+    'mifa_meander': 0.00169312729, 'mifa_low_dist': 0.003, 
     'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 
     'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 
     'ifa_mifa_meander_edge_distance': 0.0185312452 }
 
-parameters = mifa_30x110_821mhz
+parameters = mifa_14x25_2450mhz
 
-parameters['f1'] = parameters['f0'] - 2e8
-parameters['f2'] = parameters['f0'] + 2e8
+parameters['f1'] = parameters['f1'] - 1e8
+parameters['f2'] = parameters['f2'] + 1e8
 parameters['freq_points'] = 5
 
 model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,

@@ -19,7 +19,7 @@ the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 #| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
 #| V____          _______________     __________  | |  \_0 point
 #|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
+#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
 #|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
 #|               |   |   ||                   w2  | | |                  
 #|_______________|___|___||_______________________| |_|
@@ -50,7 +50,7 @@ parameters = {
     'board_hsub': 25*mm,
     'board_th': 1.5*mm,
     'mifa_meander': 1.5*mm,
-    'mifa_meander_edge_distance': 0.5*mm,
+    'mifa_low_dist': 0.5*mm,
     'f1': 2.4e9,
     'f0': 2.45e9,
     'f2': 2.5e9,
@@ -71,7 +71,7 @@ BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
     'ifa_w2': (0.3*mm,  1*mm),
     'ifa_wf': (0.3*mm,  1*mm),
     'ifa_fp': (0.6*mm,  6*mm),
-    'mifa_meander_edge_distance': (0.5*mm, 5*mm),
+    'mifa_low_dist': (0.5*mm, 5*mm),
     "mifa_meander": (0.6*mm, 2*mm),
 }
 

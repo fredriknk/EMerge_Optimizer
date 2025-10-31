@@ -14,14 +14,10 @@ from dataclasses import dataclass, asdict, field
 from typing import Dict, Tuple, Optional, List
 import numpy as np
 import emerge as em
-import re
 from dataclasses import asdict
 from typing import List, Dict
-
-_LINK_RE = re.compile(
-    r'^\s*\$\{\s*([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\s*\}\s*'      # ${alias.key}
-    r'(?:([+\-*/])\s*([0-9eE.+\-]+)\s*)?$'                      # optional op number
-)
+import re
+import ast
 
 try:
     # Optional: your validator
@@ -61,7 +57,7 @@ class AntennaParams:
 
     # Meander / tip controls
     mifa_meander: float = 2.3 * mm  # step in x (incl. gap allowance)
-    mifa_meander_edge_distance: float = 3.5 * mm
+    mifa_low_dist: float = 3.5 * mm
     mifa_tipdistance: Optional[float] = None  # defaults to meander_edge_distance
 
     # Feed / via
@@ -128,8 +124,8 @@ def _build_mifa_plates(p: AntennaParams, tl) -> List[em.geo.XYPlate]:
     ifa_e2 = p.ifa_e2
     mifa_meander = p.mifa_meander
 
-    mifa_meander_edge_distance = p.mifa_meander_edge_distance
-    mifa_tipdistance = p.mifa_tipdistance or mifa_meander_edge_distance
+    mifa_low_dist = p.mifa_low_dist
+    mifa_tipdistance = p.mifa_tipdistance or mifa_low_dist
 
     usable_x = p.board_wsub - ifa_e - ifa_e2
 
@@ -146,7 +142,7 @@ def _build_mifa_plates(p: AntennaParams, tl) -> List[em.geo.XYPlate]:
     stop_main = start_main + np.array([usable_x, ifa_w2, 0.0])
     # Do NOT append the base yet; we may extend/attach to it later
 
-    max_len_meander_y = ifa_h - mifa_meander_edge_distance - ifa_w2
+    max_len_meander_y = ifa_h - mifa_low_dist - ifa_w2
     max_tip_y = ifa_h - mifa_tipdistance - ifa_w2
 
     length_diff = ifa_l - usable_x
@@ -302,88 +298,162 @@ def _solve(model: em.Simulation, p: AntennaParams, *, air, port):
 # -----------------------------
 # Public API
 # -----------------------------
+_LINK_RE = re.compile(r"\$\{\s*([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*\}")
 
 def _resolve_linked_params(raw_list: List[Dict]) -> List[Dict]:
     """
-    Resolve string links like "${p.ifa_fp}" or "${p.ifa_fp} + 0.0002"
-    across a list of param dicts. Aliases: p, p2, p3... for dict inputs;
-    for list inputs, aliases: p (0th), p2 (1st), p3 (2nd), etc.
-    Returns a *resolved copy* of the list, leaving raw strings intact
-    in the originals so you can still print/paste the links.
+    Resolve expressions with ${alias.key} placeholders and arithmetic (+ - * /, parentheses).
+    Supports chained links and same-alias (p2 -> p2.other_key) references.
+    Rejects true self-reference (key -> key).
     """
-    # Build alias context
-    ctx = {}
+
+    # ---------- Safe arithmetic evaluator ----------
+    ALLOWED_BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
+    ALLOWED_UNARYOPS = (ast.UAdd, ast.USub)
+
+    def _safe_eval_expr(expr: str) -> float:
+        tree = ast.parse(expr, mode="eval")
+        def _eval(node: ast.AST) -> float:
+            if isinstance(node, ast.Expression): return _eval(node.body)
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                return float(node.value)
+            if isinstance(node, ast.Num): return float(node.n)  # py<3.8 compat
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ALLOWED_BINOPS):
+                l = _eval(node.left); r = _eval(node.right)
+                if isinstance(node.op, ast.Add):  return l + r
+                if isinstance(node.op, ast.Sub):  return l - r
+                if isinstance(node.op, ast.Mult): return l * r
+                if isinstance(node.op, ast.Div):  return l / r
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, ALLOWED_UNARYOPS):
+                v = _eval(node.operand)
+                if isinstance(node.op, ast.UAdd): return +v
+                if isinstance(node.op, ast.USub): return -v
+            raise ValueError(f"Unsupported syntax in expression: {expr!r}")
+        return _eval(tree)
+
+    if not raw_list:
+        return []
+
+    # Effective dicts: base overlaid with each entry
+    base = dict(raw_list[0])
+    eff: List[Dict[str, Any]] = []
+    for i, d in enumerate(raw_list):
+        e = dict(base) if i else dict(base)
+        if i: e.update(d)
+        else: e.update(d)  # keep explicit
+        eff.append(e)
+
+    # Alias map: p, p2, p3, ...
+    ctx: Dict[str, Dict[str, Any]] = {
+        ("p" if i == 0 else f"p{i+1}"): e for i, e in enumerate(eff)
+    }
+
+    # Memo: fully resolved values
+    memo: Dict[Tuple[str, str], Any] = {}
+
+    def _resolve_value(alias: str, key: str, seen: Set[Tuple[str, str]], current_alias: Optional[str]=None) -> Any:
+        """
+        Resolve ctx[alias][key], following links recursively until concrete.
+        - Uses memo to avoid recomputation.
+        - Detects cycles (including key->key).
+        - If alias == current_alias and key is already memoized, we reuse it (enables same-alias multi-key refs).
+        """
+        node = (alias, key)
+        if node in memo:
+            return memo[node]
+        if node in seen:
+            raise ValueError(f"Cyclic link detected at {alias}.{key}")
+
+        if alias not in ctx:
+            raise ValueError(f"Unknown alias '{alias}'")
+        if key not in ctx[alias]:
+            raise ValueError(f"Missing key '{key}' in alias '{alias}'")
+
+        seen.add(node)
+        raw_val = ctx[alias][key]
+
+        # Expand placeholders if string
+        if isinstance(raw_val, str):
+            # First pass: substitute all ${a.b} with resolved numbers/strings
+            def _sub_one(m: re.Match) -> str:
+                a2, k2 = m.group(1), m.group(2)
+                # Prevent true self-reference: alias/key equals the node we are resolving
+                if a2 == alias and k2 == key:
+                    raise ValueError(f"Self-reference detected at {alias}.{key}")
+                v2 = _resolve_value(a2, k2, seen, current_alias=alias)  # recurse
+                if isinstance(v2, (int, float)): return repr(float(v2))
+                if isinstance(v2, bool):          return "1.0" if v2 else "0.0"
+                return str(v2)
+
+            expanded = _LINK_RE.sub(_sub_one, raw_val).strip()
+
+            # Try to evaluate as arithmetic; if that fails, try numeric literal; else keep as string
+            try:
+                resolved = _safe_eval_expr(expanded)
+            except Exception:
+                try:
+                    resolved = float(expanded)
+                except Exception:
+                    resolved = expanded
+        else:
+            resolved = raw_val
+
+        memo[node] = resolved
+        seen.remove(node)
+        return resolved
+
+    # Build fully-resolved dicts per alias
+    out: List[Dict[str, Any]] = []
     for i, d in enumerate(raw_list):
         alias = "p" if i == 0 else f"p{i+1}"
-        ctx[alias] = d
-
-    def resolve_value(v):
-        if not isinstance(v, str):
-            return v
-        m = _LINK_RE.match(v)
-        if not m:
-            return v  # leave unrelated strings as-is
-        alias, key, op, num = m.groups()
-        if alias not in ctx:
-            raise ValueError(f"Unknown alias '{alias}' in link {v!r}")
-        base = ctx[alias].get(key)
-        if base is None:
-            raise ValueError(f"Missing key '{key}' in alias '{alias}' for link {v!r}")
-        if op and num:
-            val = float(base)
-            numf = float(num)
-            if op == '+': return val + numf
-            if op == '-': return val - numf
-            if op == '*': return val * numf
-            if op == '/': return val / numf
-        return base
-
-    # Deep-ish copy & resolve first level scalars (numbers/strings) only
-    out = []
-    for d in raw_list:
-        rd = {}
-        for k, v in d.items():
-            # Only resolve leaf scalars; leave nested dicts/lists untouched
-            rd[k] = resolve_value(v)
+        rd: Dict[str, Any] = {}
+        for k in d.keys():
+            rd[k] = _resolve_value(alias, k, set(), current_alias=alias)
         out.append(rd)
+
     return out
 
+
+# -----------------------------
+# Public API
+# -----------------------------
+
 def _normalize_params_sequence(params_any) -> List[AntennaParams]:
-    """
-    Accepts:
+    """Accepts:
       - dict with keys like {"p":..., "p2":..., ...}
       - list/tuple of dict or AntennaParams: [p, p2, ...]
       - single dict (one antenna)
       - single AntennaParams instance
     Returns a list of AntennaParams where entries > 0 inherit missing fields from entry 0.
+    Supports links like "${p.ifa_fp}" and "${p2.ifa_h} + 0.0002".
     """
-    # Single AntennaParams
+    # Single AntennaParams instance
     if isinstance(params_any, AntennaParams):
         return [params_any]
 
-    # Dict input
+    # Dict input: either {"p":..., "p2":...} or a single param mapping
     if isinstance(params_any, dict):
-        # Case A: {"p":..., "p2":...}
         p_keys = [k for k in params_any.keys() if isinstance(k, str) and k.startswith("p")]
         if p_keys:
-            keys = sorted(p_keys, key=lambda s: (len(s), s))  # p, p2, p3...
-            raw_list = [params_any[k] if isinstance(params_any[k], dict) else asdict(params_any[k])
-                        for k in keys]
-            # Resolve links like ${p.ifa_fp}
+            # dict form {"p":..., "p2":..., ...}
+            keys = sorted(p_keys, key=lambda s: (len(s), s))
+            raw_list = [params_any[k] if isinstance(params_any[k], dict) else asdict(params_any[k]) for k in keys]
+            # resolve links across aliases with base inheritance
             raw_list_resolved = _resolve_linked_params(raw_list)
             base = AntennaParams.from_dict(raw_list_resolved[0])
             out = [base]
             for d in raw_list_resolved[1:]:
                 out.append(base.merged_with(d))
             return out
-        # Case B: single dict
-        return [AntennaParams.from_dict(params_any)]
+        else:
+            # treat as a single-antenna dict
+            return [AntennaParams.from_dict(params_any)]
 
     # Sequence input: [dict/Params, ...]
     if isinstance(params_any, (list, tuple)):
         if len(params_any) == 0:
             raise ValueError("Empty parameter list")
-        raw_list = []
+        raw_list: List[Dict] = []
         for v in params_any:
             if isinstance(v, AntennaParams):
                 raw_list.append(asdict(v))
@@ -391,7 +461,6 @@ def _normalize_params_sequence(params_any) -> List[AntennaParams]:
                 raw_list.append(v)
             else:
                 raise ValueError("List entries must be dict or AntennaParams")
-        # Resolve links
         raw_list_resolved = _resolve_linked_params(raw_list)
         base = AntennaParams.from_dict(raw_list_resolved[0])
         out = [base]
@@ -399,7 +468,7 @@ def _normalize_params_sequence(params_any) -> List[AntennaParams]:
             out.append(base.merged_with(d))
         return out
 
-    raise ValueError("params must be dict {'p':...}, a single dict/Params, or a list of dict/Params")
+    raise ValueError("params must be dict {'p':..., 'p2':...}, a single dict/Params, or a list of dict/Params")
 
 def build_mifa(
     params_any,

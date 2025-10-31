@@ -19,7 +19,7 @@ the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 #| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
 #| V____          _______________     __________  | |  \_0 point
 #|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_meander_edge_distance 
+#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
 #|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
 #|               |   |   ||                   w2  | | |                  
 #|_______________|___|___||_______________________| |_|
@@ -35,11 +35,11 @@ the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 Note: ifa_l is total length including meanders and tip
 """
 
-parameters = { 'ifa_h': 0.020291324, 'ifa_l': 0.133104942, 'ifa_w1': 0.0016026077, 'ifa_w2': 0.000644213174, 'ifa_wf': 0.000883198, 'ifa_fp': 0.00797184643, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00199253282, 'mifa_meander_edge_distance': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'clearance': 0.0003, 'ifa_mifa_meander_edge_distance': 0.0125271785 }
-parameters = { 'ifa_h': 0.0194463568, 'ifa_l': 0.113888427, 'ifa_w1': 0.000494636527, 'ifa_w2': 0.000991218277, 'ifa_wf': 0.000653610716, 'ifa_fp': 0.00515405925, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00295101104, 'mifa_meander_edge_distance': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'ifa_mifa_meander_edge_distance': 0.0147696338 }
-parameters = { 'ifa_h': 0.0220243509, 'ifa_l': 0.107128555, 'ifa_w1': 0.00045360957, 'ifa_w2': 0.000439352308, 'ifa_wf': 0.000411214503, 'ifa_fp': 0.00722339282, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00169312729, 'mifa_meander_edge_distance': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'ifa_mifa_meander_edge_distance': 0.0185312452 }
+parameters = { 'ifa_h': 0.020291324, 'ifa_l': 0.133104942, 'ifa_w1': 0.0016026077, 'ifa_w2': 0.000644213174, 'ifa_wf': 0.000883198, 'ifa_fp': 0.00797184643, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00199253282, 'mifa_low_dist': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'clearance': 0.0003, 'ifa_mifa_meander_edge_distance': 0.0125271785 }
+parameters = { 'ifa_h': 0.0194463568, 'ifa_l': 0.113888427, 'ifa_w1': 0.000494636527, 'ifa_w2': 0.000991218277, 'ifa_wf': 0.000653610716, 'ifa_fp': 0.00515405925, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00295101104, 'mifa_low_dist': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'ifa_mifa_meander_edge_distance': 0.0147696338 }
+parameters = { 'ifa_h': 0.0220243509, 'ifa_l': 0.107128555, 'ifa_w1': 0.00045360957, 'ifa_w2': 0.000439352308, 'ifa_wf': 0.000411214503, 'ifa_fp': 0.00722339282, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00169312729, 'mifa_low_dist': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'ifa_mifa_meander_edge_distance': 0.0185312452 }
 
-tweak_parameters = ['ifa_l', 'ifa_h', 'ifa_w1', 'ifa_w2', 'ifa_wf', 'ifa_fp', 'mifa_meander_edge_distance', 'mifa_meander']
+tweak_parameters = ['ifa_l', 'ifa_h', 'ifa_w1', 'ifa_w2', 'ifa_wf', 'ifa_fp', 'mifa_low_dist', 'mifa_meander']
 
 base_bounds ={}
 span = 0.2
