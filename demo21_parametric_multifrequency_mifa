@@ -1,119 +1,9 @@
 import emerge as em
 import numpy as np
-from ifalib import build_mifa_plates, build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency,get_bandwidth,add_feedstub,add_ss_via
+from ifalib import mm,build_mifa_plates, build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency,get_bandwidth,add_feedstub,add_ss_via,build_dualfreq_mifa
 from optimize_lib import _fmt_params_singleline_raw
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
 
-def build_dualfreq_mifa(p,p2,
-    model=None,
-    view_mesh=False,
-    view_model=False,
-    run_simulation=True,
-    compute_farfield=True,
-    loglevel="INFO",solver=em.EMSolver.CUDSS):
-    
-    if model is None:
-        model = em.Simulation('PatchAntenna', loglevel=loglevel)
-        model.set_solver(solver)
-        model.check_version("1.1.0") # Checks version compatibility.
-
-    model, ifa, via,dielectric,air,port,ground = build_mifa(p,model,return_skeleton=True)
-
-    fp_origin = np.array([-p['board_wsub']/2 + p['ifa_fp'], p['board_hsub']/2 - p['ifa_h'] - p['ifa_te'], 0.0])
-
-    fp_origin2 = fp_origin#+np.array([0,0,-p['board_th']])
-
-    ifa2_plates = build_mifa_plates(
-        p2,
-        tl=fp_origin2,
-        name_prefix="ifa_bottom"
-    )
-
-    ifa2 = ifa2_plates[0]
-    for plate in ifa2_plates[1:]:
-        ifa2 = em.geo.add(ifa2, plate)
-
-    feedstub2 = add_feedstub(p2, fp_origin2)
-    ifa2 = em.geo.add(ifa2, feedstub2)
-    ifa = em.geo.add(ifa, ifa2)
-
-    via2=add_ss_via(p2, fp_origin2, via_name="via_p2")    
-
-    model.view()
-
-    ifa.set_material(em.lib.PEC)
-    via.set_material(em.lib.PEC)
-    # --- Assign materials and simulation settings ---------------------------
-    # Dielectric material with some transparency for display
-    dielectric.material = em.Material(3.38, color="#207020", opacity=0.9)
-
-    model.commit_geometry()
-
-    model.mw.set_resolution(p['mesh_wavelength_fraction'])
-    model.mw.set_frequency_range(p['f1'], p['f2'], p['freq_points'])
-
-    smallest_instance = min(p['ifa_w2'], p['ifa_wf'], p['ifa_w1'],p2['ifa_w2'], p2['ifa_w1'])
-    smallest_via = min(p['via_size'], p['board_th'],p2['via_size'])
-    smallest_port = min(p['ifa_wf'], p['board_th'])
-    
-    model.mesher.set_boundary_size(ifa, smallest_instance*p['mesh_boundary_size_divisor'])
-    model.mesher.set_boundary_size(via, smallest_via*p['mesh_boundary_size_divisor'])
-    model.mesher.set_face_size(port, smallest_port*p['mesh_boundary_size_divisor'])
-
-    # --- Generate mesh and preview ------------------------------------------
-    model.mesher.set_algorithm(em.Algorithm3D.HXT)
-    model.generate_mesh()
-
-    if view_mesh:
-        model.view(selections=[port], plot_mesh=True,volume_mesh=False)              # show the mesh around the port
-    if view_model:
-        model.view()
-        
-    if not run_simulation:
-        return model, None, None,None,None,None
-        
-    # --- Boundary conditions ------------------------------------------------
-    # Define lumped port with specified orientation and impedance
-    port_bc = model.mw.bc.LumpedPort(
-    port, 1,
-    width=p['ifa_wf'], height=p['board_th'],
-    direction=em.ZAX, Z0=50
-    )
-
-    # Predefining selection
-    # The outside of the air box for the absorbing boundary
-    boundary_selection = air.boundary()
-    # The patch and ground surface for PEC
-    pec_selection = em.select(ifa,ground)
-
-    # Assigning the boundary conditions
-    abc = model.mw.bc.AbsorbingBoundary(boundary_selection)
-    # --- Run frequency-domain solver ----------------------------------------
-    data = model.mw.run_sweep()
-
-    # --- Post-process S-parameters ------------------------------------------
-    freqs = data.scalar.grid.freq
-    freq_dense = np.linspace(p['f1'], p['f2'], 1001)
-
-    S11 = data.scalar.grid.model_S(1, 1, freq_dense)
-
-    if compute_farfield is False:
-        return model, S11,freq_dense, None,None,None
-
-    # --- Far-field radiation pattern ----------------------------------------
-    # Extract 2D cut at phi=0 plane and plot E-field magnitude
-    ff1 = data.field.find(freq=2.45e9)\
-        .farfield_2d((0, 0, 1), (1, 0, 0), boundary_selection)
-    ff2 = data.field.find(freq=2.45e9)\
-        .farfield_2d((0, 0, 1), (0, 1, 0), boundary_selection)
-    model.display.add_object(ifa)
-    model.display.add_object(via)
-    model.display.add_object(via2)
-    model.display.add_object(dielectric)
-    # Compute full 3D far-field and display surface colored by |E|
-    ff3d = data.field.find(freq=2.45e9).farfield_3d(boundary_selection)
-
-    return model, S11,freq_dense, ff1,ff2,ff3d
 
 
 mifa_21x90_2450mhz = {
@@ -128,38 +18,40 @@ mifa_21x90_2450mhz = {
     'ifa_e2': 0.000575394784, 
     'ifa_fp': 0.00378423695, 
     'ifa_h': 0.00790411482, 
-    'ifa_l': 0.0196761041, 
+    'ifa_l': 0.020, 
     'ifa_te': 0.0005, 
     'ifa_w1': 0.000550173526, 
-    'ifa_w2': 0.00129312109, 
+    'ifa_w2': 0.001, 
     'ifa_wf': 0.000433478781, 
     'mesh_boundary_size_divisor': 0.33,
     'mesh_wavelength_fraction': 0.2, 
-    'mifa_meander': 0.002, 
-    'mifa_meander_edge_distance': 0.003, 
+    'mifa_meander': 0.001*2+0.0003, 
+    'mifa_meander_edge_distance': 0.003+0.0005, 
     'mifa_tipdistance': 0.003, 
     'via_size': 0.0005,  
     'lambda_scale': 1 }
 
 p = mifa_21x90_2450mhz
 
-p2={"ifa_l":0.02,
+p2={"ifa_l":0.024,
     "ifa_h":0.003,
     "ifa_e":0.002,
     "ifa_fp":p['ifa_fp'],
     "ifa_e2":p['ifa_e2'],
     "via_size":p['via_size'],
-    "ifa_w1":0.0005,
-    "ifa_w2":0.0005,
-    "mifa_meander":0.0015,
+    "ifa_w1":0.00055,
+    "ifa_w2":0.001,
+    "mifa_meander":0.001*2+0.0003,
     "mifa_meander_edge_distance":0.0005,
     "board_wsub":p['board_wsub'],
     "board_th":p['board_th'],
 }
 
+parameters = {"p": p, "p2": p2}
+
 if __name__=="__main__":
     
-    model, S11, freq_dense,ff1, ff2, ff3d = build_dualfreq_mifa(p,p2,
+    model, S11, freq_dense,ff1, ff2, ff3d = build_dualfreq_mifa(parameters,
                                                    view_mesh=True, view_model=True,
                                                    run_simulation=True,compute_farfield=True,
                                                    loglevel="INFO",solver=em.EMSolver.CUDSS)
@@ -187,9 +79,8 @@ if __name__=="__main__":
         # Extract 2D cut at phi=0 plane and plot E-field magnitude
 
         if ff1 is not None and ff2 is not None:
-            plot_ff_polar(ff1, plane='phi=0°', field='Eabs', db_scale=True)
-            plot_ff_polar(ff2, plane='phi=90°', field='Eabs', db_scale=True)
-
-        if ff3d is not None:
-            plot_ff(ff3d, field='Eabs', db_scale=True)
-    
+            plot_ff(ff1.ang*180/np.pi, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, ylabel='Gain [dBi]')                # linear plot vs theta
+            plot_ff_polar(ff1.ang, [ff1.normE/em.lib.EISO, ff2.normE/em.lib.EISO], dB=True, dBfloor=-20)          # polar plot of radiation
+            surf = ff3d.surfplot('normE', rmax=60 * mm)
+            model.display.add_surf(*surf)
+            model.display.show()
