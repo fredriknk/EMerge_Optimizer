@@ -14,6 +14,14 @@ from dataclasses import dataclass, asdict, field
 from typing import Dict, Tuple, Optional, List
 import numpy as np
 import emerge as em
+import re
+from dataclasses import asdict
+from typing import List, Dict
+
+_LINK_RE = re.compile(
+    r'^\s*\$\{\s*([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)\s*\}\s*'      # ${alias.key}
+    r'(?:([+\-*/])\s*([0-9eE.+\-]+)\s*)?$'                      # optional op number
+)
 
 try:
     # Optional: your validator
@@ -58,6 +66,9 @@ class AntennaParams:
 
     # Feed / via
     via_size: float = 0.5 * mm
+    
+    #stub
+    shunt: bool = True
 
     # Meshing
     mesh_boundary_size_divisor: float = 0.33
@@ -204,7 +215,7 @@ def _build_mifa_plates(p: AntennaParams, tl) -> List[em.geo.XYPlate]:
     return [p for p in plates if p is not None]
 
 
-def _add_feed_stub(p: AntennaParams, fp_origin):
+def _add_shunt_stub(p: AntennaParams, fp_origin):
     # Short circuit stub from feed towards left by (ifa_fp - ifa_e)
     ifa_stub = p.ifa_fp - p.ifa_e
     pos = fp_origin + np.array([-ifa_stub, -2 * p.via_size, 0.0])
@@ -292,128 +303,105 @@ def _solve(model: em.Simulation, p: AntennaParams, *, air, port):
 # Public API
 # -----------------------------
 
-def _normalize_params_sequence(params_any) -> List[AntennaParams]:
-    """Accepts either {"p":..., "p2":..., ...} or [dict/Params,...].
-    Returns a list of AntennaParams where entries >0 inherit missing fields from entry 0.
+def _resolve_linked_params(raw_list: List[Dict]) -> List[Dict]:
     """
-    if isinstance(params_any, dict) and any(k.startswith("p") for k in params_any.keys()):
-        # dict form {"p":..., "p2":..., ...}
-        keys = sorted([k for k in params_any.keys() if k.startswith("p")], key=lambda s: (len(s), s))
-        base_raw = params_any[keys[0]]
-        base = AntennaParams.from_dict(base_raw) if isinstance(base_raw, dict) else base_raw
-        out = [base]
-        for k in keys[1:]:
-            v = params_any[k]
-            merged = base.merged_with(v if isinstance(v, dict) else asdict(v))
-            out.append(merged)
-        return out
+    Resolve string links like "${p.ifa_fp}" or "${p.ifa_fp} + 0.0002"
+    across a list of param dicts. Aliases: p, p2, p3... for dict inputs;
+    for list inputs, aliases: p (0th), p2 (1st), p3 (2nd), etc.
+    Returns a *resolved copy* of the list, leaving raw strings intact
+    in the originals so you can still print/paste the links.
+    """
+    # Build alias context
+    ctx = {}
+    for i, d in enumerate(raw_list):
+        alias = "p" if i == 0 else f"p{i+1}"
+        ctx[alias] = d
 
+    def resolve_value(v):
+        if not isinstance(v, str):
+            return v
+        m = _LINK_RE.match(v)
+        if not m:
+            return v  # leave unrelated strings as-is
+        alias, key, op, num = m.groups()
+        if alias not in ctx:
+            raise ValueError(f"Unknown alias '{alias}' in link {v!r}")
+        base = ctx[alias].get(key)
+        if base is None:
+            raise ValueError(f"Missing key '{key}' in alias '{alias}' for link {v!r}")
+        if op and num:
+            val = float(base)
+            numf = float(num)
+            if op == '+': return val + numf
+            if op == '-': return val - numf
+            if op == '*': return val * numf
+            if op == '/': return val / numf
+        return base
+
+    # Deep-ish copy & resolve first level scalars (numbers/strings) only
+    out = []
+    for d in raw_list:
+        rd = {}
+        for k, v in d.items():
+            # Only resolve leaf scalars; leave nested dicts/lists untouched
+            rd[k] = resolve_value(v)
+        out.append(rd)
+    return out
+
+def _normalize_params_sequence(params_any) -> List[AntennaParams]:
+    """
+    Accepts:
+      - dict with keys like {"p":..., "p2":..., ...}
+      - list/tuple of dict or AntennaParams: [p, p2, ...]
+      - single dict (one antenna)
+      - single AntennaParams instance
+    Returns a list of AntennaParams where entries > 0 inherit missing fields from entry 0.
+    """
+    # Single AntennaParams
+    if isinstance(params_any, AntennaParams):
+        return [params_any]
+
+    # Dict input
+    if isinstance(params_any, dict):
+        # Case A: {"p":..., "p2":...}
+        p_keys = [k for k in params_any.keys() if isinstance(k, str) and k.startswith("p")]
+        if p_keys:
+            keys = sorted(p_keys, key=lambda s: (len(s), s))  # p, p2, p3...
+            raw_list = [params_any[k] if isinstance(params_any[k], dict) else asdict(params_any[k])
+                        for k in keys]
+            # Resolve links like ${p.ifa_fp}
+            raw_list_resolved = _resolve_linked_params(raw_list)
+            base = AntennaParams.from_dict(raw_list_resolved[0])
+            out = [base]
+            for d in raw_list_resolved[1:]:
+                out.append(base.merged_with(d))
+            return out
+        # Case B: single dict
+        return [AntennaParams.from_dict(params_any)]
+
+    # Sequence input: [dict/Params, ...]
     if isinstance(params_any, (list, tuple)):
         if len(params_any) == 0:
             raise ValueError("Empty parameter list")
-        base_raw = params_any[0]
-        base = AntennaParams.from_dict(base_raw) if isinstance(base_raw, dict) else base_raw
+        raw_list = []
+        for v in params_any:
+            if isinstance(v, AntennaParams):
+                raw_list.append(asdict(v))
+            elif isinstance(v, dict):
+                raw_list.append(v)
+            else:
+                raise ValueError("List entries must be dict or AntennaParams")
+        # Resolve links
+        raw_list_resolved = _resolve_linked_params(raw_list)
+        base = AntennaParams.from_dict(raw_list_resolved[0])
         out = [base]
-        for v in params_any[1:]:
-            merged = base.merged_with(v if isinstance(v, dict) else asdict(v))
-            out.append(merged)
+        for d in raw_list_resolved[1:]:
+            out.append(base.merged_with(d))
         return out
 
-    raise ValueError("params must be dict {'p':..., 'p2':...} or list of dict/Params")
-
+    raise ValueError("params must be dict {'p':...}, a single dict/Params, or a list of dict/Params")
 
 def build_mifa(
-    params: Dict | AntennaParams,
-    *,
-    model: Optional[em.Simulation] = None,
-    view_mesh: bool = False,
-    view_model: bool = False,
-    run_simulation: bool = True,
-    compute_farfield: bool = False,
-    loglevel: str = "ERROR",
-    solver=em.EMSolver.PARDISO,
-    return_skeleton: bool = False,
-) -> Tuple:
-    """Build a single‑frequency MIFA and (optionally) solve.
-
-    Returns (model, S11, freq_dense, ff1, ff2, ff3d) unless return_skeleton=True
-    in which case it returns (model, ifa_union, via, dielectric, air, port, ground)
-    """
-    p = AntennaParams.from_dict(params) if isinstance(params, dict) else params
-    if p.validate and _validate is not None:
-        errs, warns, drv = _validate(asdict(p))
-        if errs:
-            for e in errs:
-                print(f"Parameter validation error: {e}")
-            raise ValueError("IFA parameter validation failed")
-
-    if model is None:
-        model = em.Simulation("MIFA", loglevel=loglevel)
-        model.set_solver(solver)
-        model.check_version("1.1.0")
-
-    dielectric, air = _make_air_and_dielectric(p)
-
-    # Feed origin (top‑right quadrant convention retained)
-    fp_origin = np.array([
-        -p.board_wsub / 2 + p.ifa_fp,
-        p.board_hsub / 2 - p.ifa_h - p.ifa_te,
-        0.0,
-    ])
-
-    plates = _build_mifa_plates(p, fp_origin)
-    ifa_union = plates[0]
-    for extra in plates[1:]:
-        ifa_union = em.geo.add(ifa_union, extra)
-
-    feed_stub = _add_feed_stub(p, fp_origin)
-    via = _add_via(p, fp_origin, name="via_top")
-
-    # Feed pad on the port side
-    feed_pad = em.geo.XYPlate(p.ifa_wf, p.ifa_h + 2 * p.via_size, position=fp_origin + np.array([0.0, -2 * p.via_size, 0.0]), name="ifa_feedpad")
-
-    ifa_union = em.geo.add(ifa_union, feed_pad)
-    ifa_union = em.geo.add(ifa_union, feed_stub)
-
-    # Simple rectangular ground below feed line up to board bottom
-    ground = em.geo.XYPlate(p.board_wsub, fp_origin[1] + p.board_hsub / 2, position=(-p.board_wsub / 2, -p.board_hsub / 2, -p.board_th))
-
-    port = _make_port(p, fp_origin)
-
-    if return_skeleton:
-        return model, ifa_union, via, dielectric, air, port, ground
-
-    _assign_materials(model, p, dielectric=dielectric, metals=[ifa_union, via, ground])
-    _mesh_common(model, p, ifa_union=ifa_union, via_list=[via], port=port)
-
-    if view_mesh:
-        model.view(selections=[port], plot_mesh=True, volume_mesh=False)
-    if view_model:
-        model.view()
-
-    if not run_simulation:
-        return model, None, None, None, None, None
-
-    data, S11, freq_dense = _solve(model, p, air=air, port=port)
-
-    if not compute_farfield:
-        return model, S11, freq_dense, None, None, None
-
-    # Far‑field at design frequency
-    ff1 = data.field.find(freq=p.f0).farfield_2d((0, 0, 1), (1, 0, 0), air.boundary())
-    ff2 = data.field.find(freq=p.f0).farfield_2d((0, 0, 1), (0, 1, 0), air.boundary())
-    ff3d = data.field.find(freq=p.f0).farfield_3d(air.boundary())
-
-    # For display
-    model.display.add_object(ifa_union)
-    model.display.add_object(via)
-    model.display.add_object(dielectric)
-
-    return model, S11, freq_dense, ff1, ff2, ff3d
-
-
-
-def build_multifreq_mifa(
     params_any,
     *,
     model: Optional[em.Simulation] = None,
@@ -459,15 +447,16 @@ def build_multifreq_mifa(
         for pl in plates[1:]:
             ifa = em.geo.add(ifa, pl)
 
-        feed_stub = _add_feed_stub(P, fp_origin)
-        ifa = em.geo.add(ifa, feed_stub)
-
+        if P.shunt:
+            shunt_stub = _add_shunt_stub(P, fp_origin)
+            ifa = em.geo.add(ifa, shunt_stub)
+            
+            via = _add_via(P, fp_origin, name=f"via_{idx}")
+            vias.append(via)
+            
         if idx == 0:
             feed_pad = em.geo.XYPlate(P.ifa_wf, P.ifa_h + 2 * P.via_size, position=fp_origin + np.array([0.0, -2 * P.via_size, 0.0]), name="ifa_feedpad")
             ifa = em.geo.add(ifa, feed_pad)
-
-        via = _add_via(P, fp_origin, name=f"via_{idx}")
-        vias.append(via)
 
         if ifa_union is None:
             ifa_union = ifa
