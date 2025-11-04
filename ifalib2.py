@@ -584,6 +584,91 @@ def build_mifa(
 # Post‑proc helpers
 # -----------------------------
 
+def get_loss_at_freq(S11: np.ndarray, f0, freq_dense: np.ndarray):
+    """Return loss (dB) at one or many frequencies.
+
+    Parameters
+    ----------
+    S11 : np.ndarray
+        Complex S11 sampled on `freq_dense`. Can be shape (N,) or (N, K) for K traces.
+    f0 : float | array-like
+        Single frequency (Hz) or array of frequencies (Hz) to evaluate at.
+    freq_dense : np.ndarray
+        Monotonic 1D frequency grid (Hz) corresponding to rows of `S11`.
+
+    Returns
+    -------
+    RL_dB : float | np.ndarray
+        If inputs are 1D S11 and scalar f0 -> float.
+        If 1D S11 and f0 is array -> (M,) array.
+        If 2D S11 (N,K) and scalar f0 -> (K,) array.
+        If 2D S11 (N,K) and f0 array -> (M,K) array.
+    """
+    f0_arr = np.atleast_1d(np.asarray(f0, dtype=float))
+    S11 = np.asarray(S11)
+    freq_dense = np.asarray(freq_dense, dtype=float)
+    scalar_input = np.isscalar(f0)
+
+    if S11.ndim == 1:
+        # Interp complex by real/imag parts for all f0 in one shot
+        re = np.interp(f0_arr, freq_dense, S11.real)
+        im = np.interp(f0_arr, freq_dense, S11.imag)
+        S = re + 1j * im
+        RL = -20.0 * np.log10(np.abs(S))
+        return float(RL[0]) if scalar_input else RL
+
+    if S11.ndim == 2:
+        N, K = S11.shape
+        out = np.empty((f0_arr.size, K), dtype=float)
+        for k in range(K):
+            re = np.interp(f0_arr, freq_dense, S11[:, k].real)
+            im = np.interp(f0_arr, freq_dense, S11[:, k].imag)
+            S = re + 1j * im
+            out[:, k] = -20.0 * np.log10(np.abs(S))
+        if scalar_input and K == 1:
+            return float(out[0, 0])
+        if scalar_input:
+            return out[0, :]
+        if K == 1:
+            return out[:, 0]
+        return out
+
+    raise ValueError("S11 must be 1D or 2D array")
+
+def get_bandwidth(S11, freq_dense, rl_threshold_dB=10.0, f0=None):
+    """Get bandwidth (Hz) at given return loss threshold (dB) arouind f0"""
+    RL_dB = -20*np.log10(np.abs(S11))
+    if f0 is None:
+        f0 = get_resonant_frequency(S11, freq_dense)
+    # Find indices where RL crosses threshold
+    indices_below = np.where(RL_dB <= -rl_threshold_dB)[0]
+    if len(indices_below) == 0:
+        return [0.0, 0.0]  # No bandwidth found
+
+    # Find closest points below threshold on either side of f0
+    freqs_below = freq_dense[indices_below]
+    left_indices = indices_below[freqs_below < f0]
+    right_indices = indices_below[freqs_below > f0]
+
+    if len(left_indices) == 0 or len(right_indices) == 0:
+        return [0.0, 0.0]  # No valid bandwidth found
+
+    f_left = freq_dense[left_indices[-1]]
+    f_right = freq_dense[right_indices[0]]
+
+    bandwidth = np.array([f_left,f_right])
+    return bandwidth
+
+
+def get_s11_at_freq(S11,f0,freq_dense):
+    """Get S11 complex value at center frequency."""
+    # If you need to interpolate complex S11 first, do real & imag separately:
+    S11_re = np.interp(f0, freq_dense, S11.real)
+    S11_im = np.interp(f0, freq_dense, S11.imag)
+    S11_f0 = S11_re + 1j*S11_im
+    return S11_f0
+
+
 def s11_rl_db(S11: np.ndarray) -> np.ndarray:
     return -20.0 * np.log10(np.abs(S11))
 
@@ -594,7 +679,7 @@ def s11_at_freq_db(S11: np.ndarray, freq_dense: np.ndarray, f: float) -> float:
     return -20.0 * np.log10(np.abs(S))
 
 
-def resonant_freq(S11: np.ndarray, freq_dense: np.ndarray) -> float:
+def get_resonant_frequency(S11: np.ndarray, freq_dense: np.ndarray) -> float:
     RL = s11_rl_db(S11)
     return float(freq_dense[np.argmax(RL)])
 

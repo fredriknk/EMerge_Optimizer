@@ -102,7 +102,7 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
 
         import numpy as _np
         import emerge as em
-        from ifalib import build_mifa, get_loss_at_freq
+        from ifalib2 import build_mifa, get_loss_at_freq
 
         try:
             solver = getattr(em.EMSolver, solver_name)
