@@ -4,7 +4,9 @@ import multiprocessing as mp
 from typing import Dict, Tuple, List, Optional
 from scipy.optimize import differential_evolution
 import json, os, math
-mm = 1e-3
+
+from ifalib2 import get_loss_at_freq
+
 mm = 1e-3  # meters per millimeter
 
 # ---------- Minimal elapsed-time logger (solver-style) ----------
@@ -416,117 +418,134 @@ def _objective_factory(
         if not ok:
             logger.warn(f"[eval {state['evals']:04d}] simulation failed ({payload}); applying penalty {penalty_if_fail:g}")
             return float(penalty_if_fail)
-
         # --- Normalize payload to RL[dB] no matter what the simulator returned ---
         freq_list, y_list = payload
-
+        
         def _as_rl_db(y: np.ndarray) -> np.ndarray:
-            """y can be RL[dB] (negative), |S11| (0..1), or complex S11."""
-            y = np.asarray(y)
-            if np.iscomplexobj(y):
-                mag = np.abs(y)
-                return -20.0 * np.log10(np.clip(mag, 1e-12, 1.0))
-            y = y.astype(float)
-            if np.nanmax(y) <= 1.0 and np.nanmin(y) >= 0.0:
-                # Looks like |S11| magnitude
-                return -20.0 * np.log10(np.clip(y, 1e-12, 1.0))
-            # Assume already RL in dB; force negative convention
-            return -np.abs(y)
-
-        # Numpy-ize
-        freq  = np.array(freq_list, dtype=float)
-        rl_db = _as_rl_db(np.array(y_list))    # this may be negative; keep as-is for logging
-
-        # Use *positive* RL for all math:
-        rl_pos = np.abs(rl_db)  
-        def _gamma_from_rl_pos_db(rl_pos_db_arr: np.ndarray) -> np.ndarray:
-            # RL_pos_dB = -20*log10|Γ|  -> |Γ| = 10^(-RL_pos/20)  (always ≤ 1)
-            return 10.0 ** (-np.asarray(rl_pos_db_arr, dtype=float) / 20.0)
-        def _gamma_from_rl_db(rl_db_arr: np.ndarray) -> np.ndarray:
-            # RL_dB = -20*log10|Γ|  -> |Γ| = 10^(-(-RL)/20) = 10^(RL/20)
-            return 10.0 ** (np.asarray(rl_db_arr, dtype=float) / 20.0)
-
-        # Interpolate RL at f0 for logging and (optional) center penalty
-        f0 = float(params['f0'])
-        f0_clamped = min(max(f0, freq.min()), freq.max())
-        rl_f0 = float(np.interp(f0_clamped, freq, rl_db))
-
-        # If we have a target and span -> optimize bandwidth (band-integrated excess |Γ|)
-        use_band = (bandwidth_target_db is not None) and (bandwidth_span is not None)
-        frac_ok = None  # for logging
-
-        if use_band:
-            f_lo, f_hi = float(bandwidth_span[0]), float(bandwidth_span[1])
-            if f_hi < f_lo:
-                f_lo, f_hi = f_hi, f_lo
-            m = (freq >= f_lo) & (freq <= f_hi)
-            if not np.any(m):
-                # Band does not overlap simulated grid -> hard penalty
-                if logger:
-                    logger.warn(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
-                return float(penalty_if_fail)
-
-            # Linear reflection (|Γ|) in-band
-            gamma  = _gamma_from_rl_pos_db(rl_pos[m])          # |Γ|
-            gamma2 = gamma * gamma                              # |Γ|^2 (power)
-
-            # Target in linear (e.g., target -10 dB -> |Γ|_t = 0.316)
-            rl_target = abs(float(bandwidth_target_db))         # e.g. 10 for -10 dB
-            g_t  = 10.0 ** (-rl_target / 20.0)                  # |Γ| target
-            g2_t = g_t * g_t                                    # power target
-
-            # Excess above target (≥ 0)
-            excess = np.clip(gamma - g_t, 0.0, None)
-
-            # Trapezoidal mean excess normalized by band width (handles non-uniform freq grids)
-            band_width = float(f_hi - f_lo)
-            if band_width <= 0.0:
-                return float(penalty_if_fail)
-
-            mean_excess_weight = 1.0  # default
-            mean_excess_weight = bandwidth_parameters.get("mean_excess_weight", mean_excess_weight)
-            mean_excess = float(np.trapz(excess, freq[m]) / band_width)
-
-            # Robustness: small worst-case term to suppress narrow spikes
-            max_excess_factor = 0.2  # tune 0.1–0.3
-            max_excess_factor = bandwidth_parameters.get("max_excess_factor", max_excess_factor)
+                """y can be RL[dB] (negative), |S11| (0..1), or complex S11."""
+                y = np.asarray(y)
+                if np.iscomplexobj(y):
+                    mag = np.abs(y)
+                    return -20.0 * np.log10(np.clip(mag, 1e-12, 1.0))
+                y = y.astype(float)
+                if np.nanmax(y) <= 1.0 and np.nanmin(y) >= 0.0:
+                    # Looks like |S11| magnitude
+                    return -20.0 * np.log10(np.clip(y, 1e-12, 1.0))
+                # Assume already RL in dB; force negative convention
+                return -np.abs(y)
+        
+        if "sweep_freqs" in params:
+            rl = get_loss_at_freq(y_list, params["sweep_freqs"], freq_list)
+            gamma = 10.0 ** (-rl / 20.0)  # |Γ| = 10^(RL/20)
             
-            max_excess = float(np.max(excess))
-
-            # Optional center weighting (very light)
-            center_weighting_factor = 0.2   # set 0.0 to disable
-            center_weighting_factor = bandwidth_parameters.get("center_weighting_factor", center_weighting_factor)
-            ex0 = float(max(_gamma_from_rl_pos_db([abs(rl_f0)])[0] - g_t, 0.0))
-
-            # Gentle preference for deeper-than-target match (smaller |Γ|^2)
-            mean_power = float(np.trapezoid(gamma2, freq[m]) / band_width)   # average |Γ|^2 over band
-            mean_power_weight = 0.1  # small weight; tune ~0.01–0.1
-            mean_power_weight = bandwidth_parameters.get("mean_power_weight", mean_power_weight)
-
-            obj = mean_excess_weight * mean_excess + max_excess_factor * max_excess + center_weighting_factor * ex0 + mean_power_weight * (mean_power / g2_t)  # minimize
-
-            # Logging aids (meeting spec means RL[dB] <= -rl_target)
-            rl_spec_db = -rl_target
-            frac_ok = float(np.mean(rl_db[m] <= rl_spec_db))
-            rl_min_band = float(np.min(rl_db[m]))
-            rl_frequency_band = freq[m][np.argmin(rl_db[m])]
+            if "sweep_weights" in params:
+                weights = np.asarray(params["sweep_weights"], dtype=float)
+                weights = weights / np.sum(weights)  # normalize
+                obj = float(np.sum(weights * (gamma ** 2)))  # minimize weighted |Γ|^2
+            else:
+                obj = float(np.sum(gamma ** 2))  # minimize |Γ|^2
+                
             if log_every_eval or obj < state["best_obj"]:
                 logger.info(
-                    f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, "
-                    f"band[{f_lo/1e9:.3f}-{f_hi/1e9:.3f} GHz]: "
-                    f"minRL={rl_min_band:.2f} dB, resonant_freq={rl_frequency_band/1e9:.3f} GHz, frac≥{rl_target:.0f}dB={frac_ok:.3f}, "
+                    f"[eval {state['evals']:04d}] RL@f_sweep={rl:.2f} dB, "
                     f"obj={obj:.6f}"
                     + ("  [NEW BEST]" if obj < state["best_obj"] else "")
                 )
         else:
-            # Fallback: minimize |Γ| at f0 (single-point)
-            gam_f0 = float(_gamma_from_rl_db(np.array([rl_f0]))[0])
-            obj = gam_f0
-            if log_every_eval or obj < state["best_obj"]:
-                logger.info(
-                    f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, obj(|Γ(f0)|)={obj:.6f}"
-                    + ("  [NEW BEST]" if obj < state["best_obj"] else "")
-                )
+            # Numpy-ize
+            freq  = np.array(freq_list, dtype=float)
+            rl_db = _as_rl_db(np.array(y_list))    # this may be negative; keep as-is for logging
+
+            # Use *positive* RL for all math:
+            rl_pos = np.abs(rl_db)  
+            def _gamma_from_rl_pos_db(rl_pos_db_arr: np.ndarray) -> np.ndarray:
+                # RL_pos_dB = -20*log10|Γ|  -> |Γ| = 10^(-RL_pos/20)  (always ≤ 1)
+                return 10.0 ** (-np.asarray(rl_pos_db_arr, dtype=float) / 20.0)
+            def _gamma_from_rl_db(rl_db_arr: np.ndarray) -> np.ndarray:
+                # RL_dB = -20*log10|Γ|  -> |Γ| = 10^(-(-RL)/20) = 10^(RL/20)
+                return 10.0 ** (np.asarray(rl_db_arr, dtype=float) / 20.0)
+
+            # Interpolate RL at f0 for logging and (optional) center penalty
+            f0 = float(params['f0'])
+            f0_clamped = min(max(f0, freq.min()), freq.max())
+            rl_f0 = float(np.interp(f0_clamped, freq, rl_db))
+
+            # If we have a target and span -> optimize bandwidth (band-integrated excess |Γ|)
+            use_band = (bandwidth_target_db is not None) and (bandwidth_span is not None)
+            frac_ok = None  # for logging
+            
+            if use_band:
+                f_lo, f_hi = float(bandwidth_span[0]), float(bandwidth_span[1])
+                if f_hi < f_lo:
+                    f_lo, f_hi = f_hi, f_lo
+                m = (freq >= f_lo) & (freq <= f_hi)
+                if not np.any(m):
+                    # Band does not overlap simulated grid -> hard penalty
+                    if logger:
+                        logger.warn(f"[eval {state['evals']:04d}] band [{f_lo:.3g},{f_hi:.3g}] not in freq grid -> penalty")
+                    return float(penalty_if_fail)
+
+                # Linear reflection (|Γ|) in-band
+                gamma  = _gamma_from_rl_pos_db(rl_pos[m])          # |Γ|
+                gamma2 = gamma * gamma                              # |Γ|^2 (power)
+
+                # Target in linear (e.g., target -10 dB -> |Γ|_t = 0.316)
+                rl_target = abs(float(bandwidth_target_db))         # e.g. 10 for -10 dB
+                g_t  = 10.0 ** (-rl_target / 20.0)                  # |Γ| target
+                g2_t = g_t * g_t                                    # power target
+
+                # Excess above target (≥ 0)
+                excess = np.clip(gamma - g_t, 0.0, None)
+
+                # Trapezoidal mean excess normalized by band width (handles non-uniform freq grids)
+                band_width = float(f_hi - f_lo)
+                if band_width <= 0.0:
+                    return float(penalty_if_fail)
+
+                mean_excess_weight = 1.0  # default
+                mean_excess_weight = bandwidth_parameters.get("mean_excess_weight", mean_excess_weight)
+                mean_excess = float(np.trapz(excess, freq[m]) / band_width)
+
+                # Robustness: small worst-case term to suppress narrow spikes
+                max_excess_factor = 0.2  # tune 0.1–0.3
+                max_excess_factor = bandwidth_parameters.get("max_excess_factor", max_excess_factor)
+                
+                max_excess = float(np.max(excess))
+
+                # Optional center weighting (very light)
+                center_weighting_factor = 0.2   # set 0.0 to disable
+                center_weighting_factor = bandwidth_parameters.get("center_weighting_factor", center_weighting_factor)
+                ex0 = float(max(_gamma_from_rl_pos_db([abs(rl_f0)])[0] - g_t, 0.0))
+
+                # Gentle preference for deeper-than-target match (smaller |Γ|^2)
+                mean_power = float(np.trapezoid(gamma2, freq[m]) / band_width)   # average |Γ|^2 over band
+                mean_power_weight = 0.1  # small weight; tune ~0.01–0.1
+                mean_power_weight = bandwidth_parameters.get("mean_power_weight", mean_power_weight)
+
+                obj = mean_excess_weight * mean_excess + max_excess_factor * max_excess + center_weighting_factor * ex0 + mean_power_weight * (mean_power / g2_t)  # minimize
+
+                # Logging aids (meeting spec means RL[dB] <= -rl_target)
+                rl_spec_db = -rl_target
+                frac_ok = float(np.mean(rl_db[m] <= rl_spec_db))
+                rl_min_band = float(np.min(rl_db[m]))
+                rl_frequency_band = freq[m][np.argmin(rl_db[m])]
+                if log_every_eval or obj < state["best_obj"]:
+                    logger.info(
+                        f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, "
+                        f"band[{f_lo/1e9:.3f}-{f_hi/1e9:.3f} GHz]: "
+                        f"minRL={rl_min_band:.2f} dB, resonant_freq={rl_frequency_band/1e9:.3f} GHz, frac≥{rl_target:.0f}dB={frac_ok:.3f}, "
+                        f"obj={obj:.6f}"
+                        + ("  [NEW BEST]" if obj < state["best_obj"] else "")
+                    )
+            else:
+                # Fallback: minimize |Γ| at f0 (single-point)
+                gam_f0 = float(_gamma_from_rl_db(np.array([rl_f0]))[0])
+                obj = gam_f0
+                if log_every_eval or obj < state["best_obj"]:
+                    logger.info(
+                        f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, obj(|Γ(f0)|)={obj:.6f}"
+                        + ("  [NEW BEST]" if obj < state["best_obj"] else "")
+                    )
 
         # Track best & persist
         improved = obj < state["best_obj"]

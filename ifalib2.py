@@ -38,11 +38,12 @@ class AntennaParams:
     board_th: float = 1.5 * mm
 
     # Electrical setup
-    f0: float = 2.45e9
-    f1: float = 2.0e9
-    f2: float = 3.6e9
-    freq_points: int = 10
+    f0: Optional[float] = 2.45e9
+    f1: Optional[float] = 2.0e9
+    f2: Optional[float] = 3.6e9
+    freq_points: Optional[int] = 10
     lambda_scale: float = 1.0
+    sweep_freqs: Optional[List[float]] = None
 
     # Radiator geometry (top-level IFA)
     ifa_l: float = 20.0 * mm
@@ -291,7 +292,6 @@ def _solve(model: em.Simulation, p: AntennaParams, *, air, port):
     data = model.mw.run_sweep()
     freq_dense = np.linspace(p.f1, p.f2, 1001)
     S11 = data.scalar.grid.model_S(1, 1, freq_dense)
-
     return data, S11, freq_dense
 
 
@@ -544,7 +544,11 @@ def build_mifa(
     smallest_port = min(P0.ifa_wf, P0.board_th)
 
     model.mw.set_resolution(P0.mesh_wavelength_fraction)
-    model.mw.set_frequency_range(P0.f1, P0.f2, P0.freq_points)
+    if P0.sweep_freqs is not None:
+        model.mw.set_frequency(P0.sweep_freqs)
+    else:
+        model.mw.set_frequency_range(P0.f1, P0.f2, P0.freq_points)
+        
     model.mesher.set_boundary_size(ifa_union, smallest_trace * P0.mesh_boundary_size_divisor)
 
     for v, P in zip(vias, P_list):

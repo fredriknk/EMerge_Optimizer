@@ -11,10 +11,9 @@ params ={
     "p": {
         'board_wsub': 0.021, 
         'board_th': 0.0015,
-        'f1': 2.0e+09, 
-        'f2': 3.0e+09, 
-        'f0': 2.0e+09,
-        'freq_points': 2, 
+        'sweep_freqs': np.array([2.9e9,2.95e9,3.0e9]),
+        'sweep_weights': np.array([1.0,1.0,1.0]),
+        'freq_points': 10, 
         'board_hsub': 0.09, 
         'ifa_e': 0.0005, 
         'ifa_e2': 0.000575394784, 
@@ -34,7 +33,6 @@ params ={
         'lambda_scale': 1 
     },
     "p2" : {
-        "f0":3.0e+09,
         "ifa_l":0.019,
         "ifa_h":"${p.mifa_low_dist}- 0.0005",
         "ifa_e":"${p.ifa_fp}",
@@ -53,7 +51,7 @@ if __name__=="__main__":
     model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
                                                    view_mesh=False, view_model=False,
                                                    run_simulation=True,compute_farfield=False,
-                                                   loglevel="INFO",solver=em.EMSolver.CUDSS)
+                                                   loglevel="INFO",solver=em.EMSolver.CUDSS,)
     
     
     if S11 is not None:
@@ -65,10 +63,8 @@ if __name__=="__main__":
         f_resonant = freq_dense[idx_min]
 
         print(f"idx_min: {idx_min}, rl_min: {RL_dB[idx_min]:.2f} dB at f_resonant: {f_resonant/1e9:.4f} GHz")
-        print(f"S11 at f0 frequency {p['f0'] / 1e9} GHz: {get_s11_at_freq(S11, p['f0'], freq_dense)} dB")
-        print(f"S11 return loss (dB) at {p['f0']/1e9} GHz: {get_loss_at_freq(S11, p['f0'], freq_dense)} dB")
-        print(f"S11 at f0 frequency {p2['f0'] / 1e9} GHz: {get_s11_at_freq(S11, p['f0'], freq_dense)} dB")
-        print(f"S11 return loss (dB) at {p2['f0']/1e9} GHz: {get_loss_at_freq(S11, p2['f0'], freq_dense)} dB")
+        print(f"S11 return loss (dB) at {p['sweep_freqs']/1e9} GHz: {get_loss_at_freq(S11, p['sweep_freqs'], freq_dense)} dB")
+        print(f"S11 return loss (dB) at {p['sweep_freqs']/1e9} GHz: {get_loss_at_freq(S11, p['sweep_freqs'], freq_dense)} dB")
         print(f"Resonant frequency (min |S11|): {get_resonant_frequency(S11, freq_dense)/1e9} GHz")
         #bw = get_bandwidth(S11, freq_dense, rl_threshold_dB=-10, f0=p['f0'])
         #print(f"Bandwidth (-10 dB): {(bw[1]-bw[0])/1e6} MHz, from/to {bw/1e6} MHz")
