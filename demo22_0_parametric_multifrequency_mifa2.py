@@ -49,7 +49,7 @@ parameters = params
 if __name__=="__main__":
     
     model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
-                                                   view_mesh=False, view_model=False,
+                                                   view_mesh=False, view_model=True,
                                                    run_simulation=True,compute_farfield=False,
                                                    loglevel="INFO",solver=em.EMSolver.CUDSS,)
     
