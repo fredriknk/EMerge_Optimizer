@@ -1018,3 +1018,340 @@ def local_minimize_ifa(
         "nfev": int(res.nfev),
     }
     return best_params, summary
+
+def optimize_multifreq_nested(
+    start_parameters: Dict[str, dict],
+    bounds_nested: Dict[str, Dict[str, Tuple[float, float]]],
+    *,
+    maxiter: int = 25,
+    popsize: int = 12,
+    seed: int = 42,
+    polish: bool = True,
+    log_every_eval: bool = False,
+    solver_name: str = "CUDSS",
+    timeout: float = 600.0,
+    include_start: bool = True,
+    stage_name: str = "multifreq_nested",
+):
+    """
+    Differential-evolution optimizer for your *nested* multifrequency MIFA params.
+
+    - `start_parameters` is your nested dict, e.g. the `params` from demo22:
+        {
+          "p":  { ... 'sweep_freqs': array([...]), 'sweep_weights': array([...]), ... },
+          "p2": { ... },
+        }
+
+    - `bounds_nested` has the same top-level keys ("p", "p2", ...)
+      and per-key (lo,hi) bounds in METERS (use mm = 1e-3).
+
+    Objective:
+      * Minimizes weighted sum of |Γ|^2 at p["sweep_freqs"].
+      * If p["sweep_weights"] exists, they are normalized and used as weights.
+    """
+    logger = OptLogger(enabled=True)
+
+    # Flatten bounds for SciPy, but keep path info to rebuild nested dicts
+    var_paths, var_ids, bounds_m = _flatten_nested_bounds(bounds_nested)
+    dim = len(var_paths)
+
+    logger.info(f"[{stage_name}] Initializing nested multifreq optimizer over {dim} variables.")
+    for vid in var_ids:
+        lo, hi = bounds_m[vid]
+        logger.info(f"[{stage_name}] Bounds {vid}: [{lo/mm:.3f}, {hi/mm:.3f}] mm")
+
+    # --- Objective over nested params ---------------------------------------
+    state = {
+        "evals": 0,
+        "best_obj": np.inf,
+        "best_rl_vec": None,
+        "avg_eval_s": None,
+        "total_evals_est": None,
+    }
+
+    if (maxiter is not None) and (popsize is not None):
+        pop_n = popsize * dim
+        state["total_evals_est"] = pop_n * (maxiter + 1)
+
+    def _objective(x: np.ndarray) -> float:
+        state["evals"] += 1
+
+        # Build nested params from vector
+        params = _pack_nested_params(start_parameters, var_paths, var_ids, x)
+
+        # Timer for this eval
+        t0 = time.perf_counter()
+
+        # Run simulation (nested params go straight into build_mifa in the worker)
+        ok, payload = _safe_sim_rl_multi(
+            params,
+            timeout=timeout,
+            solver_name=solver_name,
+            logger=logger,
+            hb_print=True,
+            hb_min_interval=10.0,
+            eta_done_evals=(state["evals"] - 1),
+            eta_total_evals=state["total_evals_est"],
+            eta_avg_eval_s=state["avg_eval_s"],
+        )
+
+        # Update average eval time
+        dt = time.perf_counter() - t0
+        if state["avg_eval_s"] is None:
+            state["avg_eval_s"] = dt
+        else:
+            state["avg_eval_s"] = 0.8 * state["avg_eval_s"] + 0.2 * dt
+
+        # If simulation died, penalty
+        penalty_if_fail = 1e6
+        if not ok:
+            logger.warn(
+                f"[{stage_name}] eval {state['evals']:04d} failed ({payload}); "
+                f"penalty={penalty_if_fail:g}"
+            )
+            return float(penalty_if_fail)
+
+        # Payload: freq_list, rl_list (RL[dB] vs freq)
+        freq_list, rl_list = payload
+        freq = np.array(freq_list, dtype=float)
+        rl_db = np.array(rl_list, dtype=float)  # expected positive RL[dB] (e.g. 0..30)
+
+        # --- Multifrequency objective based on p.sweep_freqs ----------------
+        p = params.get("p", {})
+        if "sweep_freqs" not in p:
+            raise KeyError("optimize_multifreq_nested expects params['p']['sweep_freqs'].")
+
+        sweep_freqs = np.asarray(p["sweep_freqs"], dtype=float)
+        if sweep_freqs.ndim != 1:
+            sweep_freqs = sweep_freqs.ravel()
+
+        # Clamp sweep freqs into simulated band to avoid extrapolation silliness
+        f_lo, f_hi = float(freq.min()), float(freq.max())
+        sweep_clamped = np.clip(sweep_freqs, f_lo, f_hi)
+
+        # Interpolate RL[dB] at these frequencies
+        rl_sweep = np.interp(sweep_clamped, freq, rl_db)  # still RL[dB], positive
+
+        # Convert RL[dB] -> |Γ|
+        gamma = 10.0 ** (-rl_sweep / 20.0)   # RL[dB] = -20 log10|Γ|  -> |Γ| = 10^(-RL/20)
+        gamma2 = gamma * gamma               # power reflection
+
+        # Weights (optional)
+        weights = p.get("sweep_weights", None)
+        if weights is not None:
+            w = np.asarray(weights, dtype=float).ravel()
+            if w.size != gamma2.size:
+                raise ValueError(
+                    f"sweep_weights size {w.size} != sweep_freqs size {gamma2.size}"
+                )
+            w = w / np.sum(w)
+            obj = float(np.sum(w * gamma2))
+        else:
+            # Simple mean |Γ|^2 across all sweep points
+            obj = float(np.mean(gamma2))
+
+        # Logging
+        rl_str = ", ".join(
+            f"{rl:.2f} dB@{f/1e9:.3f}GHz"
+            for rl, f in zip(rl_sweep, sweep_freqs)
+        )
+
+        improved = obj < state["best_obj"]
+        if log_every_eval or improved:
+            logger.info(
+                f"[{stage_name}] eval {state['evals']:04d} "
+                f"RL@sweep=[{rl_str}], obj=Σ|Γ|²={obj:.6e}"
+                + ("  [NEW BEST]" if improved else "")
+            )
+
+        if improved:
+            state["best_obj"] = obj
+            state["best_rl_vec"] = rl_sweep.copy()
+            # Log flattened nested params for copy/paste
+            flat_for_log = _flatten_nested_params_for_log(params)
+            logger.info("NEW BEST PARAMS (nested): " + _fmt_params_singleline_raw(flat_for_log))
+            os.makedirs("best_params_logs", exist_ok=True)
+            with open(f"best_params_logs/{stage_name}.log", "a", encoding="utf-8") as f:
+                f.write(
+                    f"{state['evals']},{obj:.9e},"
+                    + _fmt_params_singleline_raw(flat_for_log)
+                    + "\n"
+                )
+
+        return obj
+
+    # --- Build bounds list for SciPy ----------------------------------------
+    bounds_list = [bounds_m[vid] for vid in var_ids]
+
+    # Iteration callback: log current best vector in mm
+    iter_state = {"iter": 0}
+
+    def _cb(xk, convergence):
+        iter_state["iter"] += 1
+        params = _pack_nested_params(start_parameters, var_paths, var_ids, xk)
+        flat_for_log = _flatten_nested_params_for_log(params)
+
+        pieces = []
+        for (root, key), vid in zip(var_paths, var_ids):
+            val = float(flat_for_log.get(vid, params[root].get(key)))
+            pieces.append(f"{vid}={val/mm:.3f}mm")
+        msg = ", ".join(pieces)
+        logger.info(
+            f"[{stage_name}] iter {iter_state['iter']:03d} "
+            f"best-so-far: {msg} (convergence={convergence:.3g})"
+        )
+        return False  # continue
+
+    # --- Build initial population, seeding start_parameters ------------------
+    init_arg = "latinhypercube"
+    if include_start:
+        pop_n = popsize * dim
+        rng = np.random.default_rng(seed)
+
+        # Extract vector from nested start_parameters, clamped to bounds
+        start_vec = []
+        for (root, key), vid in zip(var_paths, var_ids):
+            lo, hi = bounds_m[vid]
+            v0 = None
+            if root in start_parameters and isinstance(start_parameters[root], dict):
+                v0 = start_parameters[root].get(key, None)
+            if v0 is None:
+                v0 = 0.5 * (lo + hi)
+            start_vec.append(float(np.clip(v0, lo, hi)))
+        start_vec = np.array(start_vec, dtype=float)
+
+        init_rows = [start_vec]
+        while len(init_rows) < pop_n:
+            row = np.array(
+                [rng.uniform(*bounds_m[vid]) for vid in var_ids],
+                dtype=float
+            )
+            init_rows.append(row)
+        init_pop = np.vstack(init_rows)
+        init_arg = init_pop
+        logger.info(
+            f"[{stage_name}] Using seeded initial population: pop={pop_n}, dim={dim}"
+        )
+
+    logger.info(
+        f"[{stage_name}] Starting differential evolution: "
+        f"maxiter={maxiter}, popsize={popsize}, polish={polish}"
+    )
+
+    # Run DE
+    result = differential_evolution(
+        _objective,
+        bounds=bounds_list,
+        maxiter=maxiter,
+        popsize=popsize,
+        seed=seed,
+        polish=polish,
+        updating="deferred",
+        workers=1,
+        callback=_cb,
+        tol=0.0,
+        init=init_arg,
+    )
+
+    # Rebuild nested best params
+    best_x = result.x
+    best_params = _pack_nested_params(start_parameters, var_paths, var_ids, best_x)
+
+    # Final verification run using ifalib2.build_mifa and your sweep frequencies
+    logger.info(f"[{stage_name}] Optimization complete, running final verification.")
+    from ifalib2 import build_mifa, get_loss_at_freq as get_loss_at_freq2
+    import emerge as em
+
+    solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
+    model, S11, freq_dense, *_ = build_mifa(
+        best_params,
+        view_model=False,
+        run_simulation=True,
+        compute_farfield=False,
+        solver=solver_enum,
+    )
+
+    p_best = best_params["p"]
+    sweep_freqs = np.asarray(p_best["sweep_freqs"], dtype=float).ravel()
+    rl_best_vec = [float(get_loss_at_freq2(S11, float(f), freq_dense)) for f in sweep_freqs]
+
+    rl_str = ", ".join(
+        f"{rl:.2f} dB@{f/1e9:.3f}GHz"
+        for rl, f in zip(rl_best_vec, sweep_freqs)
+    )
+    logger.info(f"[{stage_name}] FINAL RL@sweep: [{rl_str}]")
+    flat_for_log = _flatten_nested_params_for_log(best_params)
+    logger.info("FINAL BEST NESTED PARAMS: " + _fmt_params_singleline_raw(flat_for_log))
+
+    summary = {
+        "best_params": best_params,                          # nested dict
+        "best_sweep_freqs_Hz": sweep_freqs.tolist(),
+        "best_RL_dB_at_sweep": rl_best_vec,
+        "optimizer_message": result.message,
+        "optimizer_nfev": int(result.nfev),
+        "optimizer_success": bool(result.success),
+        "optimizer_fun": float(result.fun),
+    }
+    return best_params, result, summary
+
+
+
+# ---------- Nested-params utilities (for multifrequency MIFA) ----------
+
+def _flatten_nested_bounds(bounds_nested: Dict[str, Dict[str, Tuple[float, float]]]):
+    """
+    Convert nested bounds like:
+        { "p": { "ifa_h": (..), ... }, "p2": { "ifa_l": (..), ... } }
+    into:
+        var_paths = [("p","ifa_h"), ("p","ifa_l"), ..., ("p2","ifa_l"), ...]
+        var_ids   = ["p.ifa_h", "p.ifa_l", ..., "p2.ifa_l", ...]
+        flat_bounds_m = { "p.ifa_h": (lo,hi), ... }  # validated in meters
+    """
+    flat_for_check = {}
+    var_paths = []
+    var_ids = []
+
+    for root, sub in bounds_nested.items():
+        if not isinstance(sub, dict):
+            raise ValueError(f"Bounds for root '{root}' must be a dict of param -> (lo,hi)")
+        for name, b in sub.items():
+            vid = f"{root}.{name}"
+            flat_for_check[vid] = b
+            var_paths.append((root, name))
+            var_ids.append(vid)
+
+    flat_bounds_m = _ensure_bounds_in_meters(flat_for_check)
+    return var_paths, var_ids, flat_bounds_m
+
+
+def _pack_nested_params(base_nested: Dict[str, dict],
+                        var_paths: List[Tuple[str, str]],
+                        var_ids: List[str],
+                        x: np.ndarray) -> Dict[str, dict]:
+    """
+    Take a nested base dict and a vector x and write values into the nested dict:
+    var_paths[i] = (root, key) corresponds to x[i].
+    """
+    p = copy.deepcopy(base_nested)
+    for (root, key), vid, val in zip(var_paths, var_ids, x):
+        if root not in p or not isinstance(p[root], dict):
+            p[root] = {} if root not in p else dict(p[root])
+        p[root][key] = float(val)
+    return p
+
+
+def _flatten_nested_params_for_log(params_nested: Dict[str, dict]) -> Dict[str, float]:
+    """
+    Flatten nested params for logging:
+        {"p": {"ifa_h": ...}, "p2": {"ifa_h": ...}}
+    ->  {"p.ifa_h": ..., "p2.ifa_h": ...}
+    Anything non-dict is copied through unchanged.
+    """
+    out = {}
+    for root, sub in params_nested.items():
+        if isinstance(sub, dict):
+            for k, v in sub.items():
+                out[f"{root}.{k}"] = v
+        else:
+            out[root] = sub
+    return out

@@ -11,16 +11,9 @@ params ={
     "p": {
         'board_wsub': 0.0191, 
         'board_th': 0.0015,
-<<<<<<<< HEAD:demo22_0_parametric_multifrequency_mifa2.py
         'sweep_freqs': np.array([2.9e9,2.95e9,3.0e9]),
         'sweep_weights': np.array([1.0,1.0,1.0]),
         'freq_points': 10, 
-========
-        'f0': 2.5e+09, 
-        'f1': 2.0e+09, 
-        'f2': 3.0e+09, 
-        'freq_points': 10,
->>>>>>>> ba0e33050084b883a5dd228d3d62deaedb28fe40:demo21_parametric_multifrequency_mifa2.py
         'board_hsub': 0.09, 
         'ifa_e': 0.0005, 
         'ifa_e2': 0.000575394784, 

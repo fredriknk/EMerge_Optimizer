@@ -4,8 +4,9 @@ from typing import Dict, Tuple
 from optimize_lib import run_stage,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger,local_pattern_search_ifa , local_minimize_ifa
 """ MIFA OPTIMIZATION DEMO
 
-In this demo we build mifa antenna geometry and optimize it for operation
-around 2450MHz with goals for low reflection and wide bandwidth.
+The optimizer takes a good starting point and does local optimization with
+rewards for minimal reflection across the band, average min reflection and center 
+frequency.
 
 This simulation is very heavy and might take a while to fully compute.
 Its very reccomended to use a CUDA capable solver for this demo.
@@ -101,6 +102,7 @@ def main():
         init_step_mm=0.05,                       # “small step” knob
         maxiter=1000,
         bandwidth_target_db=10.0,               # Comment out to disable bandwidth goal
+        bandwidth_parameters=bandwidth_parameters,
         bandwidth_span=(p['f1'], p['f2']),      # Comment out to disable bandwidth goal
         solver_name="CUDSS",
         stage_name=SIMULATION_NAME,

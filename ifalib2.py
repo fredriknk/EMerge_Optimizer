@@ -44,7 +44,7 @@ class AntennaParams:
     freq_points: Optional[int] = 10
     lambda_scale: float = 1.0
     sweep_freqs: Optional[List[float]] = None
-
+    sweep_weights: Optional[List[float]] = None
     # Radiator geometry (top-level IFA)
     ifa_l: float = 20.0 * mm
     ifa_h: float = 8.0 * mm

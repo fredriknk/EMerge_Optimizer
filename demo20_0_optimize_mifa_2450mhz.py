@@ -4,8 +4,11 @@ from typing import Dict, Tuple
 from optimize_lib import run_stage,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger
 """ MIFA OPTIMIZATION DEMO
 
-In this demo we build mifa antenna geometry and optimize it for operation
-around 2450MHz with goals for low reflection and wide bandwidth.
+In this we do a wide search for good MIFA antenna parameters to use in
+the incremental optimization demo demo20_1_optimize_mifa_2450mhz_incremental.py
+The optimizer looks for candidates with f1-f2 refection under -10dB with a small
+reward for minimal reflection across the band, average min reflection and center 
+frequency.
 
 This simulation is very heavy and might take a while to fully compute.
 Its very reccomended to use a CUDA capable solver for this demo.
@@ -75,6 +78,13 @@ BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
     "mifa_meander": (0.6*mm, 2*mm),
 }
 
+bandwidth_parameters = {
+    "mean_excess_weight": 1.0,      #Average excess reflection weight
+    "max_excess_factor": 0.1,       #lowest-case excess reflection weight
+    "center_weighting_factor": 0.05, #Center frequency reflection weight
+    "mean_power_weight": 0.025,       #Mean power reflection weight    
+}
+
 
 SOLVER = "PARDISO"
 SOLVER = "CUDSS"
@@ -97,6 +107,7 @@ def main():
         maxiter=3, popsize=100, seed=1,
         solver_name=SOLVER, timeout=200.0,
         bandwidth_target_db=-11.0, bandwidth_span=(p['f1'], p['f2']),
+        bandwidth_parameters=None,
         include_start=False, log_every_eval=True
     )
 
