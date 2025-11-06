@@ -5,7 +5,7 @@ from typing import Dict, Tuple, List, Optional
 from scipy.optimize import differential_evolution
 import json, os, math
 
-from ifalib2 import get_loss_at_freq
+from ifalib2 import get_loss_at_freq, normalize_params_sequence
 
 mm = 1e-3  # meters per millimeter
 
@@ -110,18 +110,7 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
             solver = getattr(em.EMSolver, solver_name)
         except Exception:
             solver = em.EMSolver.PARDISO  # safe fallback
-
-        # quick sanity
-        def _precheck_params(p: dict):
-            for k in ("ifa_h","ifa_l","ifa_w1","ifa_w2","ifa_wf","ifa_fp","ifa_e","ifa_e2","ifa_te",
-                      "via_size","wsub","hsub","th","board_wsub","board_hsub","board_th",
-                      "mifa_meander","mifa_low_dist","mifa_tipdistance"):
-                if k in p and not (float(p[k]) > 0.0):
-                    raise ValueError(f"{k} must be > 0 (got {p[k]!r})")
-            hsub = p.get("hsub", p.get("board_hsub"))
-            if hsub is not None and "ifa_h" in p and "ifa_te" in p:
-                if float(hsub) - float(p["ifa_h"]) - float(p["ifa_te"]) <= 0.0:
-                    raise ValueError("substrate height must be > ifa_h + ifa_te")
+            
         _precheck_params(params)
 
         # heartbeat helper
@@ -332,17 +321,6 @@ def _fmt_params_singleline_raw(params: dict, float_fmt: str = ".9g", sort_keys: 
             s = repr(v)
         parts.append(f"'{k}': {s}")
     return "{ " + ", ".join(parts) + " }"
-
-def _ensure_bounds_in_meters(optimize_parameters: Dict[str, Tuple[float, float]]) -> Dict[str, Tuple[float, float]]:
-    cleaned = {}
-    for k, v in optimize_parameters.items():
-        if not (isinstance(v, (list, tuple)) and len(v) == 2):
-            raise ValueError(f"Bounds for '{k}' must be a 2-tuple/list in METERS (e.g., [0.5*mm, 1.0*mm]). Got: {v}")
-        lo, hi = float(v[0]), float(v[1])
-        if not (lo < hi):
-            raise ValueError(f"Lower bound must be < upper bound for '{k}'. Got {v}")
-        cleaned[k] = (lo, hi)
-    return cleaned
 
 def _pack_params(base: Dict[str, float], var_keys: List[str], x: np.ndarray) -> Dict[str, float]:
     p = copy.deepcopy(base)
@@ -775,137 +753,10 @@ def optimize_ifa(
     }
     return best_params, result, summary
 
-def local_pattern_search_ifa(
-    start_parameters: Dict[str, float],
-    optimize_parameters: Dict[str, Tuple[float, float]],
-    *,
-    init_step_frac: float = 0.10,         # initial step = 10% of each variable span
-    min_step_mm: float = 0.02,            # stop when all steps < 0.02 mm
-    shrink: float = 0.5,                   # shrink factor when no improvement
-    max_rounds: int = 50,                  # safety cap on shrink rounds
-    bandwidth_target_db: Optional[float] = None,
-    bandwidth_span: Optional[Tuple[float, float]] = None,
-    solver_name: str = "PARDISO",
-    timeout: float = 600.0,
-    log_every_eval: bool = False,
-    stage_name: str = "local"
-):
-    """
-    Bounded coordinate/pattern search:
-    - Starts from 'start_parameters' (clamped to bounds).
-    - On each round, tries +/- step along each variable (one-at-a-time).
-    - Accepts the first improving move; otherwise shrinks steps.
-    - Terminates when all steps < min_step_mm or max_rounds reached.
-    """
-    logger = OptLogger(enabled=True)
-    mm = 1e-3
-
-    bounds_m = _ensure_bounds_in_meters(optimize_parameters)
-    var_keys = list(bounds_m.keys())
-
-    # Build objective
-    objective, _ = _objective_factory(
-        start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
-        bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
-        solver_name=solver_name, timeout=timeout,
-        maxiter_hint=None, popsize_hint=None, stage_name=stage_name
-    )
-
-    # Current point = clamped start
-    x = np.array([np.clip(start_parameters[k], *bounds_m[k]) for k in var_keys], dtype=float)
-
-    # Initialize step sizes per-dimension as a fraction of span
-    spans = np.array([bounds_m[k][1] - bounds_m[k][0] for k in var_keys], dtype=float)
-    steps = np.maximum(init_step_frac * spans, 1e-6)  # meters
-
-    def eval_obj(vec: np.ndarray) -> float:
-        p = _pack_params(start_parameters, var_keys, vec)
-        ok, _errs = _is_valid_params(p)
-        if not ok:
-            return 1e6  # let the existing objective penalize too, but short-circuit here
-        return float(objective(vec))
-
-    # Evaluate start
-    f_best = eval_obj(x)
-    logger.info(f"[{stage_name}] start obj={f_best:.6f}")
-
-    rounds = 0
-    while rounds < max_rounds:
-        improved = False
-        rounds += 1
-
-        # Sweep each coordinate with +/- step (first improvement strategy)
-        for i, k in enumerate(var_keys):
-            if steps[i] < (min_step_mm * mm):
-                continue
-
-            lo, hi = bounds_m[k]
-
-            for direction in (+1.0, -1.0):
-                cand = x.copy()
-                cand[i] = np.clip(cand[i] + direction * steps[i], lo, hi)
-
-                # Skip if change is numerically negligible
-                if abs(cand[i] - x[i]) < 1e-12:
-                    continue
-
-                f_cand = eval_obj(cand)
-                if f_cand + 0.0 < f_best:   # strict improvement
-                    x, f_best = cand, f_cand
-                    logger.info(f"[{stage_name}] improve: {k} -> {x[i]/mm:.3f} mm, obj={f_best:.6f}")
-                    improved = True
-                    # Pattern move: try to keep going one more step in same direction
-                    cand2 = x.copy()
-                    cand2[i] = np.clip(cand2[i] + direction * steps[i], lo, hi)
-                    f_cand2 = eval_obj(cand2)
-                    if f_cand2 + 0.0 < f_best:
-                        x, f_best = cand2, f_cand2
-                        logger.info(f"[{stage_name}] pattern: {k} -> {x[i]/mm:.3f} mm, obj={f_best:.6f}")
-                    break  # move to next dimension
-            # end for direction
-        # end for each dimension
-
-        if not improved:
-            # No improvement this round: shrink steps
-            steps *= shrink
-            logger.info(
-                f"[{stage_name}] no improvement, shrinking steps; "
-                f"max_step={steps.max()/mm:.3f} mm, min_step={steps.min()/mm:.3f} mm"
-            )
-            # Stopping criterion
-            if np.all(steps < (min_step_mm * mm)):
-                logger.info(f"[{stage_name}] stop: all steps < {min_step_mm} mm")
-                break
-
-    best_params = _pack_params(start_parameters, var_keys, x)
-
-    # Final verification run (matches optimize_ifa’s epilogue)
-    from ifalib import build_mifa, get_loss_at_freq
-    import emerge as em
-    solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
-    model, S11, freq_dense, *_ = build_mifa(
-        best_params, view_model=False, run_simulation=True, compute_farfield=False, solver=solver_enum
-    )
-    rl_best = get_loss_at_freq(S11, best_params['f0'], freq_dense)
-
-    logger.info(f"[{stage_name}] FINAL RL@f0 = {rl_best:.2f} dB")
-    for k in var_keys:
-        logger.info(f"  {k:>24s} = {best_params[k]/mm:.3f} mm")
-
-    summary = {
-        "best_return_loss_dB_at_f0": float(rl_best),
-        "best_params": {k: float(best_params[k]) for k in best_params},
-        "optimizer_nfev": None,          # not from SciPy; could count in objective state if desired
-        "optimizer_success": True,
-        "optimizer_fun": float(f_best),
-        "rounds": int(rounds),
-    }
-    return best_params, summary
-
-
 from typing import Dict, Tuple, Optional
 import numpy as np
 from dataclasses import dataclass
+from ifalib2 import resolve_linked_params
 
 def local_minimize_ifa(
     start_parameters: Dict[str, float],
@@ -931,28 +782,27 @@ def local_minimize_ifa(
     init_step_mm controls the initial local step size.
     """
     from scipy.optimize import minimize, Bounds
-
+    from ifalib2 import normalize_params_sequence,denormalize_params_sequence
     logger = OptLogger(enabled=True)
     mm = 1e-3
-
-    bounds_m = _ensure_bounds_in_meters(optimize_parameters)
-    var_keys = list(bounds_m.keys())
+    
+    bounds = optimize_parameters
+    var_keys = list(bounds.keys())
 
     # Build objective with your existing machinery
     objective, _ = _objective_factory(
-        start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
+        start_parameters, bounds, logger=logger, log_every_eval=log_every_eval,
         bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
         solver_name=solver_name, timeout=timeout,
         maxiter_hint=None, popsize_hint=None, stage_name=stage_name,
         bandwidth_parameters=bandwidth_parameters
     )
-
     # Seed vector (clamped)
-    x0 = np.array([np.clip(start_parameters[k], *bounds_m[k]) for k in var_keys], dtype=float)
+    x0 = np.array([np.clip(start_parameters[k], *bounds[k]) for k in var_keys], dtype=float)
 
     # Bounds object for SciPy
-    lo = np.array([bounds_m[k][0] for k in var_keys], dtype=float)
-    hi = np.array([bounds_m[k][1] for k in var_keys], dtype=float)
+    lo = np.array([bounds[k][0] for k in var_keys], dtype=float)
+    hi = np.array([bounds[k][1] for k in var_keys], dtype=float)
     sbounds = Bounds(lo, hi, keep_feasible=True)
 
     # Initial step sizing (meters)
@@ -1018,340 +868,3 @@ def local_minimize_ifa(
         "nfev": int(res.nfev),
     }
     return best_params, summary
-
-def optimize_multifreq_nested(
-    start_parameters: Dict[str, dict],
-    bounds_nested: Dict[str, Dict[str, Tuple[float, float]]],
-    *,
-    maxiter: int = 25,
-    popsize: int = 12,
-    seed: int = 42,
-    polish: bool = True,
-    log_every_eval: bool = False,
-    solver_name: str = "CUDSS",
-    timeout: float = 600.0,
-    include_start: bool = True,
-    stage_name: str = "multifreq_nested",
-):
-    """
-    Differential-evolution optimizer for your *nested* multifrequency MIFA params.
-
-    - `start_parameters` is your nested dict, e.g. the `params` from demo22:
-        {
-          "p":  { ... 'sweep_freqs': array([...]), 'sweep_weights': array([...]), ... },
-          "p2": { ... },
-        }
-
-    - `bounds_nested` has the same top-level keys ("p", "p2", ...)
-      and per-key (lo,hi) bounds in METERS (use mm = 1e-3).
-
-    Objective:
-      * Minimizes weighted sum of |Γ|^2 at p["sweep_freqs"].
-      * If p["sweep_weights"] exists, they are normalized and used as weights.
-    """
-    logger = OptLogger(enabled=True)
-
-    # Flatten bounds for SciPy, but keep path info to rebuild nested dicts
-    var_paths, var_ids, bounds_m = _flatten_nested_bounds(bounds_nested)
-    dim = len(var_paths)
-
-    logger.info(f"[{stage_name}] Initializing nested multifreq optimizer over {dim} variables.")
-    for vid in var_ids:
-        lo, hi = bounds_m[vid]
-        logger.info(f"[{stage_name}] Bounds {vid}: [{lo/mm:.3f}, {hi/mm:.3f}] mm")
-
-    # --- Objective over nested params ---------------------------------------
-    state = {
-        "evals": 0,
-        "best_obj": np.inf,
-        "best_rl_vec": None,
-        "avg_eval_s": None,
-        "total_evals_est": None,
-    }
-
-    if (maxiter is not None) and (popsize is not None):
-        pop_n = popsize * dim
-        state["total_evals_est"] = pop_n * (maxiter + 1)
-
-    def _objective(x: np.ndarray) -> float:
-        state["evals"] += 1
-
-        # Build nested params from vector
-        params = _pack_nested_params(start_parameters, var_paths, var_ids, x)
-
-        # Timer for this eval
-        t0 = time.perf_counter()
-
-        # Run simulation (nested params go straight into build_mifa in the worker)
-        ok, payload = _safe_sim_rl_multi(
-            params,
-            timeout=timeout,
-            solver_name=solver_name,
-            logger=logger,
-            hb_print=True,
-            hb_min_interval=10.0,
-            eta_done_evals=(state["evals"] - 1),
-            eta_total_evals=state["total_evals_est"],
-            eta_avg_eval_s=state["avg_eval_s"],
-        )
-
-        # Update average eval time
-        dt = time.perf_counter() - t0
-        if state["avg_eval_s"] is None:
-            state["avg_eval_s"] = dt
-        else:
-            state["avg_eval_s"] = 0.8 * state["avg_eval_s"] + 0.2 * dt
-
-        # If simulation died, penalty
-        penalty_if_fail = 1e6
-        if not ok:
-            logger.warn(
-                f"[{stage_name}] eval {state['evals']:04d} failed ({payload}); "
-                f"penalty={penalty_if_fail:g}"
-            )
-            return float(penalty_if_fail)
-
-        # Payload: freq_list, rl_list (RL[dB] vs freq)
-        freq_list, rl_list = payload
-        freq = np.array(freq_list, dtype=float)
-        rl_db = np.array(rl_list, dtype=float)  # expected positive RL[dB] (e.g. 0..30)
-
-        # --- Multifrequency objective based on p.sweep_freqs ----------------
-        p = params.get("p", {})
-        if "sweep_freqs" not in p:
-            raise KeyError("optimize_multifreq_nested expects params['p']['sweep_freqs'].")
-
-        sweep_freqs = np.asarray(p["sweep_freqs"], dtype=float)
-        if sweep_freqs.ndim != 1:
-            sweep_freqs = sweep_freqs.ravel()
-
-        # Clamp sweep freqs into simulated band to avoid extrapolation silliness
-        f_lo, f_hi = float(freq.min()), float(freq.max())
-        sweep_clamped = np.clip(sweep_freqs, f_lo, f_hi)
-
-        # Interpolate RL[dB] at these frequencies
-        rl_sweep = np.interp(sweep_clamped, freq, rl_db)  # still RL[dB], positive
-
-        # Convert RL[dB] -> |Γ|
-        gamma = 10.0 ** (-rl_sweep / 20.0)   # RL[dB] = -20 log10|Γ|  -> |Γ| = 10^(-RL/20)
-        gamma2 = gamma * gamma               # power reflection
-
-        # Weights (optional)
-        weights = p.get("sweep_weights", None)
-        if weights is not None:
-            w = np.asarray(weights, dtype=float).ravel()
-            if w.size != gamma2.size:
-                raise ValueError(
-                    f"sweep_weights size {w.size} != sweep_freqs size {gamma2.size}"
-                )
-            w = w / np.sum(w)
-            obj = float(np.sum(w * gamma2))
-        else:
-            # Simple mean |Γ|^2 across all sweep points
-            obj = float(np.mean(gamma2))
-
-        # Logging
-        rl_str = ", ".join(
-            f"{rl:.2f} dB@{f/1e9:.3f}GHz"
-            for rl, f in zip(rl_sweep, sweep_freqs)
-        )
-
-        improved = obj < state["best_obj"]
-        if log_every_eval or improved:
-            logger.info(
-                f"[{stage_name}] eval {state['evals']:04d} "
-                f"RL@sweep=[{rl_str}], obj=Σ|Γ|²={obj:.6e}"
-                + ("  [NEW BEST]" if improved else "")
-            )
-
-        if improved:
-            state["best_obj"] = obj
-            state["best_rl_vec"] = rl_sweep.copy()
-            # Log flattened nested params for copy/paste
-            flat_for_log = _flatten_nested_params_for_log(params)
-            logger.info("NEW BEST PARAMS (nested): " + _fmt_params_singleline_raw(flat_for_log))
-            os.makedirs("best_params_logs", exist_ok=True)
-            with open(f"best_params_logs/{stage_name}.log", "a", encoding="utf-8") as f:
-                f.write(
-                    f"{state['evals']},{obj:.9e},"
-                    + _fmt_params_singleline_raw(flat_for_log)
-                    + "\n"
-                )
-
-        return obj
-
-    # --- Build bounds list for SciPy ----------------------------------------
-    bounds_list = [bounds_m[vid] for vid in var_ids]
-
-    # Iteration callback: log current best vector in mm
-    iter_state = {"iter": 0}
-
-    def _cb(xk, convergence):
-        iter_state["iter"] += 1
-        params = _pack_nested_params(start_parameters, var_paths, var_ids, xk)
-        flat_for_log = _flatten_nested_params_for_log(params)
-
-        pieces = []
-        for (root, key), vid in zip(var_paths, var_ids):
-            val = float(flat_for_log.get(vid, params[root].get(key)))
-            pieces.append(f"{vid}={val/mm:.3f}mm")
-        msg = ", ".join(pieces)
-        logger.info(
-            f"[{stage_name}] iter {iter_state['iter']:03d} "
-            f"best-so-far: {msg} (convergence={convergence:.3g})"
-        )
-        return False  # continue
-
-    # --- Build initial population, seeding start_parameters ------------------
-    init_arg = "latinhypercube"
-    if include_start:
-        pop_n = popsize * dim
-        rng = np.random.default_rng(seed)
-
-        # Extract vector from nested start_parameters, clamped to bounds
-        start_vec = []
-        for (root, key), vid in zip(var_paths, var_ids):
-            lo, hi = bounds_m[vid]
-            v0 = None
-            if root in start_parameters and isinstance(start_parameters[root], dict):
-                v0 = start_parameters[root].get(key, None)
-            if v0 is None:
-                v0 = 0.5 * (lo + hi)
-            start_vec.append(float(np.clip(v0, lo, hi)))
-        start_vec = np.array(start_vec, dtype=float)
-
-        init_rows = [start_vec]
-        while len(init_rows) < pop_n:
-            row = np.array(
-                [rng.uniform(*bounds_m[vid]) for vid in var_ids],
-                dtype=float
-            )
-            init_rows.append(row)
-        init_pop = np.vstack(init_rows)
-        init_arg = init_pop
-        logger.info(
-            f"[{stage_name}] Using seeded initial population: pop={pop_n}, dim={dim}"
-        )
-
-    logger.info(
-        f"[{stage_name}] Starting differential evolution: "
-        f"maxiter={maxiter}, popsize={popsize}, polish={polish}"
-    )
-
-    # Run DE
-    result = differential_evolution(
-        _objective,
-        bounds=bounds_list,
-        maxiter=maxiter,
-        popsize=popsize,
-        seed=seed,
-        polish=polish,
-        updating="deferred",
-        workers=1,
-        callback=_cb,
-        tol=0.0,
-        init=init_arg,
-    )
-
-    # Rebuild nested best params
-    best_x = result.x
-    best_params = _pack_nested_params(start_parameters, var_paths, var_ids, best_x)
-
-    # Final verification run using ifalib2.build_mifa and your sweep frequencies
-    logger.info(f"[{stage_name}] Optimization complete, running final verification.")
-    from ifalib2 import build_mifa, get_loss_at_freq as get_loss_at_freq2
-    import emerge as em
-
-    solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
-    model, S11, freq_dense, *_ = build_mifa(
-        best_params,
-        view_model=False,
-        run_simulation=True,
-        compute_farfield=False,
-        solver=solver_enum,
-    )
-
-    p_best = best_params["p"]
-    sweep_freqs = np.asarray(p_best["sweep_freqs"], dtype=float).ravel()
-    rl_best_vec = [float(get_loss_at_freq2(S11, float(f), freq_dense)) for f in sweep_freqs]
-
-    rl_str = ", ".join(
-        f"{rl:.2f} dB@{f/1e9:.3f}GHz"
-        for rl, f in zip(rl_best_vec, sweep_freqs)
-    )
-    logger.info(f"[{stage_name}] FINAL RL@sweep: [{rl_str}]")
-    flat_for_log = _flatten_nested_params_for_log(best_params)
-    logger.info("FINAL BEST NESTED PARAMS: " + _fmt_params_singleline_raw(flat_for_log))
-
-    summary = {
-        "best_params": best_params,                          # nested dict
-        "best_sweep_freqs_Hz": sweep_freqs.tolist(),
-        "best_RL_dB_at_sweep": rl_best_vec,
-        "optimizer_message": result.message,
-        "optimizer_nfev": int(result.nfev),
-        "optimizer_success": bool(result.success),
-        "optimizer_fun": float(result.fun),
-    }
-    return best_params, result, summary
-
-
-
-# ---------- Nested-params utilities (for multifrequency MIFA) ----------
-
-def _flatten_nested_bounds(bounds_nested: Dict[str, Dict[str, Tuple[float, float]]]):
-    """
-    Convert nested bounds like:
-        { "p": { "ifa_h": (..), ... }, "p2": { "ifa_l": (..), ... } }
-    into:
-        var_paths = [("p","ifa_h"), ("p","ifa_l"), ..., ("p2","ifa_l"), ...]
-        var_ids   = ["p.ifa_h", "p.ifa_l", ..., "p2.ifa_l", ...]
-        flat_bounds_m = { "p.ifa_h": (lo,hi), ... }  # validated in meters
-    """
-    flat_for_check = {}
-    var_paths = []
-    var_ids = []
-
-    for root, sub in bounds_nested.items():
-        if not isinstance(sub, dict):
-            raise ValueError(f"Bounds for root '{root}' must be a dict of param -> (lo,hi)")
-        for name, b in sub.items():
-            vid = f"{root}.{name}"
-            flat_for_check[vid] = b
-            var_paths.append((root, name))
-            var_ids.append(vid)
-
-    flat_bounds_m = _ensure_bounds_in_meters(flat_for_check)
-    return var_paths, var_ids, flat_bounds_m
-
-
-def _pack_nested_params(base_nested: Dict[str, dict],
-                        var_paths: List[Tuple[str, str]],
-                        var_ids: List[str],
-                        x: np.ndarray) -> Dict[str, dict]:
-    """
-    Take a nested base dict and a vector x and write values into the nested dict:
-    var_paths[i] = (root, key) corresponds to x[i].
-    """
-    p = copy.deepcopy(base_nested)
-    for (root, key), vid, val in zip(var_paths, var_ids, x):
-        if root not in p or not isinstance(p[root], dict):
-            p[root] = {} if root not in p else dict(p[root])
-        p[root][key] = float(val)
-    return p
-
-
-def _flatten_nested_params_for_log(params_nested: Dict[str, dict]) -> Dict[str, float]:
-    """
-    Flatten nested params for logging:
-        {"p": {"ifa_h": ...}, "p2": {"ifa_h": ...}}
-    ->  {"p.ifa_h": ..., "p2.ifa_h": ...}
-    Anything non-dict is copied through unchanged.
-    """
-    out = {}
-    for root, sub in params_nested.items():
-        if isinstance(sub, dict):
-            for k, v in sub.items():
-                out[f"{root}.{k}"] = v
-        else:
-            out[root] = sub
-    return out

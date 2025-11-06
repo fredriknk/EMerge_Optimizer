@@ -3,7 +3,7 @@ import numpy as np
 from ifalib import mm, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency,get_bandwidth
 from optimize_lib import _fmt_params_singleline_raw
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
-from ifalib2 import AntennaParams, build_mifa, _resolve_linked_params,unflatten_param_alias_dict
+from ifalib2 import AntennaParams, build_mifa, resolve_linked_params,unflatten_param_alias_dict
 
 
 

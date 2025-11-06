@@ -72,7 +72,7 @@ class AntennaParams:
     mesh_wavelength_fraction: float = 0.2
 
     # Material (simple FR‑4 like; override if needed)
-    eps_r: float = 3.38
+    eps_r: float = 4.4
 
     # Behavior
     validate: bool = True
@@ -286,12 +286,13 @@ def _solve(model: em.Simulation, p: AntennaParams, *, air, port):
     return data, S11, freq_dense
 
 
+
 # -----------------------------
 # Public API
 # -----------------------------
 _LINK_RE = re.compile(r"\$\{\s*([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)\s*\}")
 
-def _resolve_linked_params(raw_list: List[Dict]) -> List[Dict]:
+def resolve_linked_params(raw_list: List[Dict]) -> List[Dict]:
     """
     Resolve expressions with ${alias.key} placeholders and arithmetic (+ - * /, parentheses).
     Supports chained links and same-alias (p2 -> p2.other_key) references.
@@ -405,85 +406,149 @@ def _resolve_linked_params(raw_list: List[Dict]) -> List[Dict]:
     return out
 
 
-# -----------------------------
-# Public API
-# -----------------------------
+import math
+from typing import Any, Dict
+from dataclasses import is_dataclass, asdict
 
+def _as_dict(x: Any) -> Dict[str, Any]:
+    if is_dataclass(x):
+        return asdict(x)
+    if isinstance(x, dict):
+        return dict(x)
+    raise TypeError("Entries must be dicts or dataclass instances")
 
-def _unflatten_alias_param_dict(flat: Dict[str, Any]) -> Dict[str, Any]:
+def _values_equal(a: Any, b: Any) -> bool:
+    # Fast path: same object
+    if a is b:
+        return True
+
+    # Handle None / exact type equality
+    if a is None or b is None:
+        return a is None and b is None
+
+    # Numpy-aware branch
+    try:
+        import numpy as np
+        # numpy scalar vs python scalar
+        if np.isscalar(a) and np.isscalar(b):
+            # Keep exact equality to preserve sparsity; relax to isclose if you prefer
+            try:
+                return bool(a == b)
+            except Exception:
+                return False
+        # ndarray vs ndarray
+        if isinstance(a, np.ndarray) and isinstance(b, np.ndarray):
+            # Exact array equality; change to allclose(...) if you want tolerance
+            return a.shape == b.shape and np.array_equal(a, b)
+    except Exception:
+        pass
+
+    # dict vs dict (recursive)
+    if isinstance(a, dict) and isinstance(b, dict):
+        if a.keys() != b.keys():
+            return False
+        for k in a.keys():
+            if not _values_equal(a[k], b[k]):
+                return False
+        return True
+
+    # list/tuple vs list/tuple (elementwise)
+    if (isinstance(a, (list, tuple)) and isinstance(b, (list, tuple))
+            and type(a) is type(b) and len(a) == len(b)):
+        return all(_values_equal(x, y) for x, y in zip(a, b))
+
+    # Fallback to plain equality (covers str, bool, numbers, etc.)
+    try:
+        return a == b
+    except Exception:
+        return False
+
+def _delta_dict(base: Dict[str, Any], other: Dict[str, Any], *, include_none: bool = False) -> Dict[str, Any]:
     """
-    Convert a flattened alias dict like:
-
-        {
-          'p.board_wsub': 0.0191,
-          'p.ifa_h': 0.0113,
-          'p2.ifa_l': 0.0180,
-          'p2.shunt': 0,
-          ...
-        }
-
-    into a nested form usable by build_mifa / AntennaParams:
-
-        {
-          'p':  {'board_wsub': 0.0191, 'ifa_h': 0.0113, ...},
-          'p2': {'ifa_l': 0.0180, 'shunt': 0, ...},
-          ...
-        }
-
-    Non-flattened keys (no dot) are preserved as-is.
-    If both 'p' and 'p.xxx' exist, values are merged.
+    Return keys in 'other' whose values differ from 'base'.
+    Numpy arrays are compared with array_equal; dicts/lists recurse.
     """
-    if not isinstance(flat, dict):
-        return flat
-
-    # Detect if this looks like a flattened alias dict at all
-    has_flat_alias = any(
-        isinstance(k, str) and "." in k and k.split(".", 1)[0].startswith("p")
-        for k in flat.keys()
-    )
-    if not has_flat_alias:
-        return flat  # nothing to do
-
-    base: Dict[str, Any] = {}
-    alias_buckets: Dict[str, Dict[str, Any]] = {}
-
-    # First copy non-alias keys
-    for k, v in flat.items():
-        if isinstance(k, str) and "." in k and k.split(".", 1)[0].startswith("p"):
+    out: Dict[str, Any] = {}
+    for k, v in other.items():
+        if (not include_none) and (v is None):
             continue
-        base[k] = v
+        if (k not in base) or (not _values_equal(base[k], v)):
+            out[k] = v
+    return out
 
-    # Now gather 'p.xxx' / 'p2.yyy' into buckets
-    for k, v in flat.items():
-        if not (isinstance(k, str) and "." in k):
-            continue
+def _flatten_alias(nested: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    flat: Dict[str, Any] = {}
+    for alias, inner in nested.items():
+        for k, v in inner.items():
+            flat[f"{alias}.{k}"] = v
+    return flat
 
-        alias, subkey = k.split(".", 1)
-        if not alias.startswith("p"):
-            # Not a param alias, keep as-is
-            base[k] = v
-            continue
+def denormalize_params_sequence(
+    seq: Union[List[Any], tuple],
+    *,
+    deltas_only: bool = True,
+    include_none: bool = False,
+    flatten_alias: bool = False,
+    start_alias: str = "p"
+) -> Dict[str, Any]:
+    """
+    Invert `normalize_params_sequence`:
+      - Input: normalized sequence [AntennaParams|dict, ...] where seq[i>0] already
+               includes inherited values from seq[0].
+      - Output: nested dict {"p": {...}, "p2": {...}, ...}.
+        By default, 'p' is full and 'p2+' are deltas vs 'p' (so the round-trip
+        through normalize retains inheritance sparsity).
 
-        if alias not in alias_buckets:
-            # If an explicit alias dict already exists, start from that
-            if alias in base and isinstance(base[alias], dict):
-                alias_buckets[alias] = dict(base[alias])
-            else:
-                alias_buckets[alias] = {}
-        alias_buckets[alias][subkey] = v
+    Args
+    ----
+    seq : list/tuple of AntennaParams or dict
+        Normalized items (fully-populated).
+    deltas_only : bool
+        If True (default), emit only keys that differ from base for p2+.
+        If False, emit full dict for every alias.
+    include_none : bool
+        If True, keep keys whose value is None.
+    flatten_alias : bool
+        If True, return flattened alias form: {"p.foo": v, "p2.bar": w, ...}.
+    start_alias : str
+        Alias for the first entry; subsequent entries get numeric suffixes
+        (p2, p3, ...).
 
-    # Merge alias buckets back into base
-    for alias, subdict in alias_buckets.items():
-        if alias in base and isinstance(base[alias], dict):
-            merged = dict(base[alias])
-            merged.update(subdict)
-            base[alias] = merged
+    Returns
+    -------
+    dict
+        Either nested {"p": {...}, "p2": {...}, ...} or flattened alias dict.
+    """
+    if not isinstance(seq, (list, tuple)) or len(seq) == 0:
+        raise ValueError("denormalize_params_sequence: non-empty list/tuple required")
+
+    # Normalize inputs to plain dicts
+    dicts = [_as_dict(x) for x in seq]
+
+    # Build nested with inheritance sparsity if requested
+    nested: Dict[str, Dict[str, Any]] = {}
+
+    base_alias = start_alias
+    nested[base_alias] = {
+        k: v for k, v in dicts[0].items() if (include_none or v is not None)
+    }
+
+    # Subsequent entries
+    for i in range(1, len(dicts)):
+        alias = f"{start_alias}{i+1}"  # p2, p3, ...
+        if deltas_only:
+            nested[alias] = _delta_dict(nested[base_alias], dicts[i], include_none=include_none)
         else:
-            base[alias] = subdict
+            nested[alias] = {
+                k: v for k, v in dicts[i].items() if (include_none or v is not None)
+            }
 
-    return base
+    if flatten_alias:
+        return _flatten_alias(nested)
+    return nested
 
-def _normalize_params_sequence(params_any) -> List[AntennaParams]:
+
+def normalize_params_sequence(params_any) -> List[AntennaParams]:
     """Accepts:
       - dict with keys like {"p":..., "p2":..., ...}
       - list/tuple of dict or AntennaParams: [p, p2, ...]
@@ -496,24 +561,15 @@ def _normalize_params_sequence(params_any) -> List[AntennaParams]:
     if isinstance(params_any, AntennaParams):
         return [params_any]
 
-    # Dict input: flattened or nested
+    # Dict input: either {"p":..., "p2":...} or a single param mapping
     if isinstance(params_any, dict):
-        # NEW: if it's in flattened alias form ('p.ifa_h', 'p2.ifa_l', ...),
-        # convert it to nested {"p": {...}, "p2": {...}} first.
-        params_any = _unflatten_alias_param_dict(params_any)
-
-        p_keys = [k for k in params_any.keys()
-                  if isinstance(k, str) and k.startswith("p")]
+        p_keys = [k for k in params_any.keys() if isinstance(k, str) and k.startswith("p")]
         if p_keys:
             # dict form {"p":..., "p2":..., ...}
             keys = sorted(p_keys, key=lambda s: (len(s), s))
-            raw_list = [
-                params_any[k] if isinstance(params_any[k], dict)
-                else asdict(params_any[k])
-                for k in keys
-            ]
+            raw_list = [params_any[k] if isinstance(params_any[k], dict) else asdict(params_any[k]) for k in keys]
             # resolve links across aliases with base inheritance
-            raw_list_resolved = _resolve_linked_params(raw_list)
+            raw_list_resolved = resolve_linked_params(raw_list)
             base = AntennaParams.from_dict(raw_list_resolved[0])
             out = [base]
             for d in raw_list_resolved[1:]:
@@ -532,8 +588,7 @@ def _normalize_params_sequence(params_any) -> List[AntennaParams]:
             if isinstance(v, AntennaParams):
                 raw_list.append(asdict(v))
             elif isinstance(v, dict):
-                # Also support flattened dicts inside the list
-                raw_list.append(_unflatten_alias_param_dict(v))
+                raw_list.append(v)
             else:
                 raise ValueError("List entries must be dict or AntennaParams")
         raw_list_resolved = _resolve_linked_params(raw_list)
@@ -543,16 +598,11 @@ def _normalize_params_sequence(params_any) -> List[AntennaParams]:
             out.append(base.merged_with(d))
         return out
 
-    raise ValueError(
-        "params must be dict {'p':..., 'p2':...}, "
-        "a flattened alias dict {'p.ifa_h':..., 'p2.ifa_l':...}, "
-        "a single dict/Params, or a list of dict/Params"
-    )
-    
-def unflatten_param_alias_dict(flat: Dict[str, Any]) -> Dict[str, Any]:
-    """Public helper: wrapper around _unflatten_alias_param_dict."""
-    return _unflatten_alias_param_dict(flat)
+    raise ValueError("params must be dict {'p':..., 'p2':...}, a single dict/Params, or a list of dict/Params")
 
+# -----------------------------
+# BUILDER FUNCTION
+# -----------------------------
 def build_mifa(
     params_any,
     *,
@@ -572,7 +622,7 @@ def build_mifa(
 
     Returns (model, S11, freq_dense, ff1, ff2, ff3d)
     """
-    P_list = _normalize_params_sequence(params_any)
+    P_list = normalize_params_sequence(params_any)
     P0 = P_list[0]
 
     if model is None:
