@@ -632,7 +632,7 @@ def optimize_ifa(
     for k, (lo, hi) in _ensure_bounds_in_meters(optimize_parameters).items():
         logger.info(f"Bounds {k}: [{lo/mm:.3f}, {hi/mm:.3f}] mm")
 
-    bounds_m = _ensure_bounds_in_meters(optimize_parameters)
+    bounds_m = optimize_parameters
     
     objective, var_keys = _objective_factory(
     start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,

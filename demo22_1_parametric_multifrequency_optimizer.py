@@ -4,61 +4,59 @@ from optimize_lib import local_minimize_ifa ,_fmt_params_singleline_raw, write_j
 from datetime import datetime
 import os
 import multiprocessing as mp
+import array
 
-params = {
-    'p.board_wsub': 0.0191, 
-    'p.board_th': 0.0015,
-    'p.sweep_freqs': np.array([2.45e9,5.0e9]),
-    'p.sweep_weights': np.array([1.0,1.0]),
-    'p.board_hsub': 0.06, 
-    'p.ifa_e': 0.0005, 
-    'p.ifa_e2': 0.000575394784, 
-    'p.ifa_fp': 0.0045, 
-    'p.ifa_h': 0.00790411482, 
-    'p.ifa_l': 0.020, 
-    'p.ifa_te': 0.0005, 
-    'p.ifa_w1': 0.0005, 
-    'p.ifa_w2': 0.001, 
-    'p.ifa_wf': 0.0005, 
-    'p.mesh_boundary_size_divisor': 0.33,
-    'p.mesh_wavelength_fraction': 0.2, 
-    'p.mifa_meander': 0.001*2+0.0003, 
-    'p.mifa_low_dist': "${p.ifa_h} - 0.003", 
-    'p.mifa_tipdistance': "${p.mifa_low_dist}", 
-    'p.via_size': 0.0005,  
-    'p.lambda_scale': 1,
-    
-    "p2.ifa_l":0.021,
-    "p2.ifa_h":"${p.mifa_low_dist}- 0.0005",
-    "p2.ifa_e":"${p.ifa_fp}",
-    "p2.ifa_w2":0.0006,
-    "p2.mifa_meander":"${p2.ifa_w2}*2+0.0003",
-    "p2.mifa_low_dist":"${p.mifa_low_dist} - 0.003",
-    "p2.mifa_tipdistance":"${p2.mifa_low_dist}",
-    "p2.shunt":False,
-}
+parameters= {'p.board_wsub': 0.0191, 
+         'p.board_th': 0.0015, 
+         'p.sweep_freqs': array([2.45e+09, 5.00e+09]), 
+         'p.sweep_weights': array([1., 1.]), 
+         'p.board_hsub': 0.06, 'p.ifa_e': 0.0005, 
+         'p.ifa_e2': 0.000575394784, 'p.ifa_fp': 0.00364461081, 
+         'p.ifa_h': 0.00909984885, 'p.ifa_l': 0.0355663827, 
+         'p.ifa_te': 0.0005, 
+         'p.ifa_w1': 0.00112657281, 'p.ifa_w2': 0.000445781771, 'p.ifa_wf': 0.000398836163, 
+         'p.mesh_boundary_size_divisor': 0.33, 
+         'p.mesh_wavelength_fraction': 0.2, 'p.mifa_meander': 0.0023, 
+         'p.mifa_low_dist': '${p.ifa_h} - 0.003', 
+         'p.mifa_tipdistance': '${p.mifa_low_dist}', 
+         'p.via_size': 0.0005, 
+         'p.lambda_scale': 1, 
+         
+         'p2.ifa_l': 0.00796519359, 'p2.ifa_h': '${p.mifa_low_dist}- 0.0005', 
+         'p2.ifa_e': '${p.ifa_fp}', 
+         'p2.ifa_w2': 0.00033083229, 
+         'p2.mifa_meander': '${p2.ifa_w2}*2+0.0003', 
+         'p2.mifa_low_dist': '${p.mifa_low_dist} - 0.003', 
+         'p2.mifa_tipdistance': '${p2.mifa_low_dist}', 
+         'p2.shunt': 0 }
 
-BASE_BOUNDS = {
-    'p.ifa_h':        (6*mm, 12.0*mm),
-    'p.ifa_l':        (12*mm, 36*mm),
-    'p.ifa_w1':       (0.3*mm, 2*mm),
-    'p.ifa_w2':       (0.3*mm, 1*mm),
-    'p.ifa_wf':       (0.3*mm, 1*mm),
-    'p.ifa_fp':       (3*mm, 12*mm),
-    
-    'p2.ifa_l':        (5*mm, 36*mm),
-    'p2.ifa_w2':       (0.3*mm, 1*mm),
-}
+tweak_parameters = [
+    'p.ifa_fp',
+    'p.ifa_h',
+    'p.ifa_l',
+    'p.ifa_w1',
+    'p.ifa_w2',
+    'p.ifa_wf',
+    'p2.ifa_l',
+    'p2.ifa_w2',
+]
+
+base_bounds = {}
+span = 0.15  # +/- 15%
+for k in list(parameters.keys()):
+    if k in tweak_parameters:
+        val = parameters[k]
+        delta = val * span
+        base_bounds[k] = (val - delta, val + delta)
 
 SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
 SIMULATION_NAME = "mifa_2400mhz_optimization_incremental"
-OPTIMIZATION_MODE = "BW_OPTIMIZE"
 
 def main():
-    p = dict(params)
-    bounds = dict(BASE_BOUNDS)
+    p = dict(parameters)
+    bounds = dict(base_bounds)
     
     
     p['p.lambda_scale'] = 1.0
