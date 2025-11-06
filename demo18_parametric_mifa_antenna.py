@@ -1,6 +1,6 @@
 import emerge as em
 import numpy as np
-from ifalib import build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency,get_bandwidth
+from ifalib2 import build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_frequency,get_bandwidth
 #from ifalib2 import AntennaParams, build_mifa
 from optimize_lib import _fmt_params_singleline_raw
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
@@ -24,7 +24,7 @@ This simulation is quite heavy and might take a while to fully compute.
 #|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
 #|               |   |   ||     <----->      |__|_|_|_|
 #|               |   |   ||   mifa_meander    w2  | | |mifa_tipdistance(Optional, 
-#|_______________|___|___||_______________________| |_|will be set to edge distance if 0)
+#|_______________|___|___||_______________________| |_|will be set to edge distance if None)
 #| <---ifa_e---->| w1|   wf\                      | |
 #|               |__fp___|  \                     | |
 #|                       |    feed point          | |
@@ -83,9 +83,9 @@ mifa_30x110_821mhz = {
     'mifa_meander': 0.00169312729, 'mifa_low_dist': 0.003, 
     'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 
     'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 
-    'ifa_mifa_meander_edge_distance': 0.0185312452 }
+    }
 
-parameters = mifa_14x25_2450mhz
+parameters = mifa_21x90_2450mhz
 
 parameters['f1'] = parameters['f1'] - 1e8
 parameters['f2'] = parameters['f2'] + 1e8

@@ -201,12 +201,13 @@ def validate_ifa_params(params_any: Any) -> Tuple[List[str], List[str], Dict[str
 
     for i, ap in enumerate(norm):
         alias = "p" if i == 0 else f"p{i+1}"
-        errs, warns, drv = _validate_ifa_core(asdict(ap))
-        # tag messages so you can tell which profile they came from
-        all_errors.extend([f"[{alias}] {m}" for m in errs])
-        all_warnings.extend([f"[{alias}] {m}" for m in warns])
-        if i == 0:
-            derived_first = drv
+        if ap.validate: 
+            errs, warns, drv = _validate_ifa_core(asdict(ap))
+            # tag messages so you can tell which profile they came from
+            all_errors.extend([f"[{alias}] {m}" for m in errs])
+            all_warnings.extend([f"[{alias}] {m}" for m in warns])
+            if i == 0:
+                derived_first = drv
 
     return all_errors, all_warnings, derived_first
 
