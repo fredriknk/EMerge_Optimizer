@@ -1,13 +1,14 @@
+from typing import Dict, Tuple
 import numpy as np
 from ifalib import mm
-from optimize_lib import local_minimize_ifa ,_fmt_params_singleline_raw, write_json
+from optimize_lib import local_minimize_ifa ,_fmt_params_singleline_raw, write_json,run_stage
 from datetime import datetime
 import os
 import multiprocessing as mp
 
 params= { 'p.board_wsub': 0.0191, 
          'p.board_th': 0.0015, 
-         'p.sweep_freqs': np.array([2.45e+09, 5.00e+09]), 
+         'p.sweep_freqs': np.array([2.45e+09, 5.80e+09]), 
          'p.sweep_weights': np.array([1., 1.]), 
          'p.board_hsub': 0.06, 'p.ifa_e': 0.0005, 
          'p.ifa_e2': 0.000575394784, 'p.ifa_fp': 0.00364461081, 
@@ -29,50 +30,42 @@ params= { 'p.board_wsub': 0.0191,
          'p2.mifa_tipdistance': '${p2.mifa_low_dist}', 
          'p2.shunt': 0 }
 
-tweak_parameters = [
-    'p.ifa_fp',
-    'p.ifa_h',
-    'p.ifa_l',
-    'p.ifa_w1',
-    'p.ifa_w2',
-    'p.ifa_wf',
-    'p2.ifa_l',
-    'p2.ifa_w2',
-]
-
-base_bounds = {}
-span = 0.15  # +/- 15%
-for k in list(params.keys()):
-    if k in tweak_parameters:
-        val = params[k]
-        delta = val * span
-        base_bounds[k] = (val - delta, val + delta)
+BASE_BOUNDS: Dict[str, Tuple[float, float]] = {
+    'p.ifa_h':  (6*mm, 12.0*mm),
+    'p.ifa_l':  (5*mm,   36*mm),
+    'p.ifa_w1': (0.3*mm,  2*mm),
+    'p.ifa_w2': (0.3*mm,  1*mm),
+    'p.ifa_wf': (0.3*mm,  1*mm),
+    'p.ifa_fp': (0.6*mm,  10*mm),
+    
+    'p2.ifa_l':  (5*mm,   36*mm),
+    'p2.ifa_w2': (0.3*mm,  1*mm),
+}
 
 SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
-SIMULATION_NAME = "mifa_2400mhz_optimization_incremental"
+SIMULATION_NAME = "Mifa_multifreq_optimization2_45_5_8_global"
 
 def main():
     p = dict(params)
-    bounds = dict(base_bounds)
+    bounds = dict(BASE_BOUNDS)
     
     
     p['p.lambda_scale'] = 1.0
     p['p.mesh_wavelength_fraction'] = 0.20
     p['p.mesh_boundary_size_divisor'] = 0.33
-    
 
-    best_local, sum_local = local_minimize_ifa(
-        start_parameters=p,            # your seed (e.g., current best)
-        optimize_parameters=bounds,      # bounds (meters)
-        method="Powell",                         # or "Nelder-Mead"
-        init_step_mm=0.1,                       # “small step” knob
-        maxiter=1000,
-        solver_name="CUDSS",
-        stage_name=f"{datetime.now().strftime('%Y%m%d_%H%M')}_{SIMULATION_NAME}",
-        log_every_eval=True,
+    
+    best_local, result, summary = run_stage(
+        f"{datetime.now().strftime('%Y%m%d_%H%M')}_{SIMULATION_NAME}_global",
+        p, bounds,
+        maxiter=3, popsize=100, seed=1,
+        bandwidth_target_db=None, bandwidth_span=None,
+        solver_name=SOLVER, timeout=200.0,
+        include_start=False, log_every_eval=True
     )
+
 
     # Done: save final winner, print compact line again
     os.makedirs("best_params_log", exist_ok=True)

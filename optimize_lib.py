@@ -104,7 +104,7 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
 
         import numpy as _np
         import emerge as em
-        from ifalib2 import build_mifa, get_loss_at_freq
+        from ifalib2 import build_mifa
 
         try:
             solver = getattr(em.EMSolver, solver_name)
@@ -127,7 +127,7 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
         stop_hb = threading.Event()
         th = threading.Thread(target=heartbeat, args=("build", stop_hb, 5.0), daemon=True)
         th.start()
-
+        
         model, S11, freq_dense, *_ = build_mifa(
             params,
             view_model=False,
@@ -141,13 +141,11 @@ def _eval_worker_multi(params: dict, conn, solver_name: str = "PARDISO", project
             conn.send(("log", "build_mifa_done")) 
         except: pass
 
-        # postprocess (short): optional micro-heartbeat if you want
-        rl_db = _np.array([float(get_loss_at_freq(S11, float(f), freq_dense)) for f in freq_dense], dtype=float)
         try: 
             conn.send(("log", "postprocess_done"))
         except: pass
 
-        conn.send(("ok", (list(map(float, freq_dense)), rl_db.tolist())))
+        conn.send(("ok", (list(map(float, freq_dense)), S11)))
     except Exception as e:
         try:
             conn.send(("pyerr", f"{type(e).__name__}: {e}"))
@@ -398,7 +396,7 @@ def _objective_factory(
             logger.warn(f"[eval {state['evals']:04d}] simulation failed ({payload}); applying penalty {penalty_if_fail:g}")
             return float(penalty_if_fail)
         # --- Normalize payload to RL[dB] no matter what the simulator returned ---
-        freq_list, y_list = payload
+        freq_dense, S11 = payload
         
         def _as_rl_db(y: np.ndarray) -> np.ndarray:
                 """y can be RL[dB] (negative), |S11| (0..1), or complex S11."""
@@ -415,10 +413,11 @@ def _objective_factory(
         params = asdict(normalize_params_sequence(params)[0])
 
         if "sweep_freqs" in params:
-            s11_db = np.asarray(get_loss_at_freq(y_list, params["sweep_freqs"], freq_list), dtype=float)  # <=0 dB
+            s11_db = np.asarray(get_loss_at_freq(S11, params["sweep_freqs"], freq_dense), dtype=float)  # <=0 dB
+            print(f"S11 return loss (dB) at {params['sweep_freqs']/1e9} GHz: {get_loss_at_freq(S11, params['sweep_freqs'], freq_dense)} dB")
             # Convert S11(dB) -> |Γ|
-            gamma = 10.0 ** (s11_db / 20.0)          # |Γ| in [0,1)
-            rl = -s11_db                          # Return loss (positive dB) for logging
+            gamma = 10.0 ** (-s11_db / 20.0)          # |Γ| in [0,1)
+            rl = s11_db                          # Return loss (positive dB) for logging
 
             if "sweep_weights" in params:
                 weights = np.asarray(params["sweep_weights"], dtype=float)
@@ -433,8 +432,8 @@ def _objective_factory(
             )
         else:
             # Numpy-ize
-            freq  = np.array(freq_list, dtype=float)
-            rl_db = _as_rl_db(np.array(y_list))    # this may be negative; keep as-is for logging
+            freq  = np.array(freq_dense, dtype=float)
+            rl_db = _as_rl_db(np.array(S11))    # this may be negative; keep as-is for logging
 
             # Use *positive* RL for all math:
             rl_pos = np.abs(rl_db)  
@@ -631,7 +630,7 @@ def optimize_ifa(
     # Announce optimization plan
     dims = len(optimize_parameters)
     logger.info(f"Initializing optimizer over {dims} parameters.")
-    for k, (lo, hi) in _ensure_bounds_in_meters(optimize_parameters).items():
+    for k, (lo, hi) in optimize_parameters.items():
         logger.info(f"Bounds {k}: [{lo/mm:.3f}, {hi/mm:.3f}] mm")
 
     bounds_m = optimize_parameters
@@ -728,7 +727,7 @@ def optimize_ifa(
 
     # Final simulate + plot
     logger.info("Optimization complete. Running final verification simulation for best parameters.")
-    from ifalib import build_mifa, get_loss_at_freq
+    from ifalib2 import build_mifa, get_loss_at_freq
     import emerge as em
 
     solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
