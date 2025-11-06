@@ -4,7 +4,7 @@ import multiprocessing as mp
 from typing import Dict, Tuple, List, Optional
 from scipy.optimize import differential_evolution
 import json, os, math
-
+from dataclasses import asdict
 from ifalib2 import get_loss_at_freq, normalize_params_sequence
 
 mm = 1e-3  # meters per millimeter
@@ -411,24 +411,25 @@ def _objective_factory(
                     return -20.0 * np.log10(np.clip(y, 1e-12, 1.0))
                 # Assume already RL in dB; force negative convention
                 return -np.abs(y)
-        
+        params = asdict(normalize_params_sequence(params)[0])
+
         if "sweep_freqs" in params:
-            rl = get_loss_at_freq(y_list, params["sweep_freqs"], freq_list)
-            gamma = 10.0 ** (-rl / 20.0)  # |Γ| = 10^(RL/20)
-            
+            s11_db = np.asarray(get_loss_at_freq(y_list, params["sweep_freqs"], freq_list), dtype=float)  # <=0 dB
+            # Convert S11(dB) -> |Γ|
+            gamma = 10.0 ** (s11_db / 20.0)          # |Γ| in [0,1)
+            rl = -s11_db                          # Return loss (positive dB) for logging
+
             if "sweep_weights" in params:
                 weights = np.asarray(params["sweep_weights"], dtype=float)
-                weights = weights / np.sum(weights)  # normalize
-                obj = float(np.sum(weights * (gamma ** 2)))  # minimize weighted |Γ|^2
+                weights = weights / np.sum(weights)
+                obj = float(np.sum(weights * (gamma ** 2)))    # minimize mean |Γ|^2
             else:
-                obj = float(np.sum(gamma ** 2))  # minimize |Γ|^2
-                
-            if log_every_eval or obj < state["best_obj"]:
-                logger.info(
-                    f"[eval {state['evals']:04d}] RL@f_sweep={rl:.2f} dB, "
-                    f"obj={obj:.6f}"
-                    + ("  [NEW BEST]" if obj < state["best_obj"] else "")
-                )
+                obj = float(np.mean(gamma ** 2))
+
+            logger.info(
+                f"[eval {state['evals']:04d}] RL@f_sweep={rl} dB, obj={obj:.6f}"
+                + ("  [NEW BEST]" if obj < state.get("best_obj", np.inf) else "")
+            )
         else:
             # Numpy-ize
             freq  = np.array(freq_list, dtype=float)
@@ -482,7 +483,7 @@ def _objective_factory(
 
                 mean_excess_weight = 1.0  # default
                 mean_excess_weight = bandwidth_parameters.get("mean_excess_weight", mean_excess_weight)
-                mean_excess = float(np.trapz(excess, freq[m]) / band_width)
+                mean_excess = float(np.trapezoid(excess, freq[m]) / band_width)
 
                 # Robustness: small worst-case term to suppress narrow spikes
                 max_excess_factor = 0.2  # tune 0.1–0.3
@@ -529,11 +530,11 @@ def _objective_factory(
         improved = obj < state["best_obj"]
         if improved:
             state["best_obj"] = obj
-            state["best_rl"]  = rl_f0
+            state["best_rl"]  = rl
             logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_raw(params))
             os.makedirs("best_params_logs", exist_ok=True)
             with open(f"best_params_logs/{stage_name}.log","a",encoding="utf-8") as f:
-                f.write(f"{state['evals']},{rl_f0:.3f},{obj:.9f}," + _fmt_params_singleline_raw(params) + "\n")
+                f.write(f"{state['evals']},{rl},{obj:.9f}," + _fmt_params_singleline_raw(params) + "\n")
 
         return obj
 
