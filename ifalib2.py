@@ -63,7 +63,7 @@ class AntennaParams:
     # Meander / tip controls
     mifa_meander: float = 2.3 * mm  # step in x (incl. gap allowance)
     mifa_low_dist: float = 3.5 * mm
-    mifa_tipdistance: Optional[float] = None  # defaults to meander_edge_distance
+    mifa_tipdistance: Optional[float] = mifa_low_dist  # defaults to meander_edge_distance
 
     # Feed / via
     via_size: float = 0.5 * mm
@@ -80,6 +80,8 @@ class AntennaParams:
 
     # Behavior
     validate: bool = True
+    
+    clearance: Optional[float] = 0.0003  # Optional clearance around geometry for meshing
 
     def merged_with(self, overrides: Dict) -> "AntennaParams":
         data = asdict(self)

@@ -782,7 +782,7 @@ def local_minimize_ifa(
     init_step_mm controls the initial local step size.
     """
     from scipy.optimize import minimize, Bounds
-    from ifalib2 import normalize_params_sequence,denormalize_params_sequence
+    from ifalib2 import normalize_params_sequence
     logger = OptLogger(enabled=True)
     mm = 1e-3
     
@@ -846,20 +846,19 @@ def local_minimize_ifa(
     best_params = _pack_params(start_parameters, var_keys, x_best)
 
     # Final verification run (your usual epilogue)
-    from ifalib import build_mifa, get_loss_at_freq
+    from ifalib2 import build_mifa, get_loss_at_freq
     import emerge as em
     solver_enum = getattr(em.EMSolver, solver_name, em.EMSolver.PARDISO)
     model, S11, freq_dense, *_ = build_mifa(
         best_params, view_model=False, run_simulation=True, compute_farfield=False, solver=solver_enum
     )
-    rl_best = get_loss_at_freq(S11, best_params['f0'], freq_dense)
+    rl_best = get_loss_at_freq(S11, best_params['p.sweep_freqs'], freq_dense)
 
     logger.info(f"[{stage_name}] {method} done: fun={float(res.fun):.6f} "
                 f"RL@f0={rl_best:.2f} dB, iters={res.nit}, fev={res.nfev}, success={res.success}")
 
     summary = {
         "method": method,
-        "best_return_loss_dB_at_f0": float(rl_best),
         "best_params": {k: float(best_params[k]) for k in best_params},
         "optimizer_success": bool(res.success),
         "optimizer_fun": float(res.fun),
