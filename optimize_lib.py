@@ -386,6 +386,7 @@ def _objective_factory(
             eta_total_evals=state["total_evals_est"],
             eta_avg_eval_s=state["avg_eval_s"],
         )
+        params_dict = dict(params)
         # update avg eval duration
         dt = time.perf_counter() - state["t_last_start"]
         if state["avg_eval_s"] is None:
@@ -531,10 +532,10 @@ def _objective_factory(
         if improved:
             state["best_obj"] = obj
             state["best_rl"]  = rl
-            logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_raw(params))
+            logger.info("NEW BEST PARAMS: " + _fmt_params_singleline_raw(params_dict))
             os.makedirs("best_params_logs", exist_ok=True)
             with open(f"best_params_logs/{stage_name}.log","a",encoding="utf-8") as f:
-                f.write(f"{state['evals']},{rl},{obj:.9f}," + _fmt_params_singleline_raw(params) + "\n")
+                f.write(f"{state['evals']},{rl},{obj:.9f}," + _fmt_params_singleline_raw(params_dict) + "\n")
 
         return obj
 
