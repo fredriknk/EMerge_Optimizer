@@ -43,9 +43,10 @@ if __name__=="__main__":
         
         p = parameters
         
-        p['p.lambda_scale'] = 0.5  # Ensure scale is 1 for frequency calculations
-        p['p.mesh_wavelength_fraction'] = 0.5
-        p['p.mesh_boundary_size_divisor'] = 1.0
+        p['p.lambda_scale'] = 1  # Ensure scale is 1 for frequency calculations
+        p['p.mesh_wavelength_fraction'] = 0.2
+        p['p.mesh_boundary_size_divisor'] = 0.33
+        p['p.sweep_freqs'] = np.linspace(p['p.sweep_freqs'][0], p['p.sweep_freqs'][-1], 11)
         
         print(f"Main Antenna: {_fmt_params_singleline_raw(p)}")
         
