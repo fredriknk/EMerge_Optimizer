@@ -63,7 +63,7 @@ class AntennaParams:
     # Meander / tip controls
     mifa_meander: float = 2.3 * mm  # step in x (incl. gap allowance)
     mifa_low_dist: float = 3.5 * mm
-    mifa_tipdistance: Optional[float] = mifa_low_dist  # defaults to meander_edge_distance
+    mifa_tipdistance: Optional[float] = None  # defaults to mifa_low_dist
 
     # Feed / via
     via_size: float = 0.5 * mm
@@ -132,7 +132,10 @@ def _build_mifa_plates(p: AntennaParams, tl) -> List[em.geo.XYPlate]:
     mifa_meander = p.mifa_meander
 
     mifa_low_dist = p.mifa_low_dist
-    mifa_tipdistance = p.mifa_tipdistance or mifa_low_dist
+    if p.mifa_tipdistance is None:
+        mifa_tipdistance = mifa_low_dist
+    else:
+        mifa_tipdistance = p.mifa_tipdistance
 
     usable_x = p.board_wsub - ifa_e - ifa_e2
 
