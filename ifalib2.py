@@ -38,10 +38,10 @@ class AntennaParams:
     board_th: float = 1.5 * mm
 
     # Electrical setup
-    f0: Optional[float] = 2.45e9
-    f1: Optional[float] = 2.0e9
-    f2: Optional[float] = 3.6e9
-    freq_points: Optional[int] = 10
+    f0: Optional[float] = None
+    f1: Optional[float] = None
+    f2: Optional[float] = None
+    freq_points: Optional[int] = None
     lambda_scale: float = 1.0
     sweep_freqs: Optional[List[float]] = None
     sweep_weights: Optional[List[float]] = None
@@ -238,7 +238,10 @@ def _make_air_and_dielectric(p: AntennaParams):
                             position=(-p.board_wsub / 2, -p.board_hsub / 2, -p.board_th))
 
     # Air box sized from lambda at f2
-    lam2 = em.lib.C0 / (p.f2) * p.lambda_scale
+    if p.sweep_freqs is not None and len(p.sweep_freqs) > 0:
+        lam2 = em.lib.C0 / (min(p.sweep_freqs)) * p.lambda_scale
+    else:
+        lam2 = em.lib.C0 / (p.f1) * p.lambda_scale
     fwd, back = 0.50 * lam2, 0.30 * lam2
     side, top, bot = 0.30 * lam2, 0.30 * lam2, 0.30 * lam2
 
@@ -268,29 +271,17 @@ def _assign_materials(model: em.Simulation, p: AntennaParams, *, dielectric, met
     model.commit_geometry()
 
 
-def _mesh_common(model: em.Simulation, p: AntennaParams, *, ifa_union, via_list, port):
-    model.mw.set_resolution(p.mesh_wavelength_fraction)
-    model.mw.set_frequency_range(p.f1, p.f2, p.freq_points)
-
-    smallest_trace = min(p.ifa_w2, p.ifa_wf, p.ifa_w1)
-    smallest_port = min(p.ifa_wf, p.board_th)
-    model.mesher.set_boundary_size(ifa_union, smallest_trace * p.mesh_boundary_size_divisor)
-
-    for v in via_list:
-        model.mesher.set_boundary_size(v, min(p.via_size, p.board_th) * p.mesh_boundary_size_divisor)
-
-    model.mesher.set_face_size(port, smallest_port * p.mesh_boundary_size_divisor)
-    model.mesher.set_algorithm(em.Algorithm3D.HXT)
-    model.generate_mesh()
-
-
 def _solve(model: em.Simulation, p: AntennaParams, *, air, port):
     # BCs
     _ = model.mw.bc.AbsorbingBoundary(air.boundary())
     _ = model.mw.bc.LumpedPort(port, 1, width=p.ifa_wf, height=p.board_th, direction=em.ZAX, Z0=50)
 
     data = model.mw.run_sweep()
-    freq_dense = np.linspace(p.f1, p.f2, 1001)
+    if p.sweep_freqs is not None and len(p.sweep_freqs) > 0:
+        freq_dense = np.linspace(min(p.sweep_freqs), max(p.sweep_freqs), 1001)
+    else:
+        freq_dense = np.linspace(p.f1, p.f2, 1001)
+        
     S11 = data.scalar.grid.model_S(1, 1, freq_dense)
     return data, S11, freq_dense
 
@@ -418,6 +409,80 @@ def _resolve_linked_params(raw_list: List[Dict]) -> List[Dict]:
 # Public API
 # -----------------------------
 
+
+def _unflatten_alias_param_dict(flat: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert a flattened alias dict like:
+
+        {
+          'p.board_wsub': 0.0191,
+          'p.ifa_h': 0.0113,
+          'p2.ifa_l': 0.0180,
+          'p2.shunt': 0,
+          ...
+        }
+
+    into a nested form usable by build_mifa / AntennaParams:
+
+        {
+          'p':  {'board_wsub': 0.0191, 'ifa_h': 0.0113, ...},
+          'p2': {'ifa_l': 0.0180, 'shunt': 0, ...},
+          ...
+        }
+
+    Non-flattened keys (no dot) are preserved as-is.
+    If both 'p' and 'p.xxx' exist, values are merged.
+    """
+    if not isinstance(flat, dict):
+        return flat
+
+    # Detect if this looks like a flattened alias dict at all
+    has_flat_alias = any(
+        isinstance(k, str) and "." in k and k.split(".", 1)[0].startswith("p")
+        for k in flat.keys()
+    )
+    if not has_flat_alias:
+        return flat  # nothing to do
+
+    base: Dict[str, Any] = {}
+    alias_buckets: Dict[str, Dict[str, Any]] = {}
+
+    # First copy non-alias keys
+    for k, v in flat.items():
+        if isinstance(k, str) and "." in k and k.split(".", 1)[0].startswith("p"):
+            continue
+        base[k] = v
+
+    # Now gather 'p.xxx' / 'p2.yyy' into buckets
+    for k, v in flat.items():
+        if not (isinstance(k, str) and "." in k):
+            continue
+
+        alias, subkey = k.split(".", 1)
+        if not alias.startswith("p"):
+            # Not a param alias, keep as-is
+            base[k] = v
+            continue
+
+        if alias not in alias_buckets:
+            # If an explicit alias dict already exists, start from that
+            if alias in base and isinstance(base[alias], dict):
+                alias_buckets[alias] = dict(base[alias])
+            else:
+                alias_buckets[alias] = {}
+        alias_buckets[alias][subkey] = v
+
+    # Merge alias buckets back into base
+    for alias, subdict in alias_buckets.items():
+        if alias in base and isinstance(base[alias], dict):
+            merged = dict(base[alias])
+            merged.update(subdict)
+            base[alias] = merged
+        else:
+            base[alias] = subdict
+
+    return base
+
 def _normalize_params_sequence(params_any) -> List[AntennaParams]:
     """Accepts:
       - dict with keys like {"p":..., "p2":..., ...}
@@ -431,13 +496,22 @@ def _normalize_params_sequence(params_any) -> List[AntennaParams]:
     if isinstance(params_any, AntennaParams):
         return [params_any]
 
-    # Dict input: either {"p":..., "p2":...} or a single param mapping
+    # Dict input: flattened or nested
     if isinstance(params_any, dict):
-        p_keys = [k for k in params_any.keys() if isinstance(k, str) and k.startswith("p")]
+        # NEW: if it's in flattened alias form ('p.ifa_h', 'p2.ifa_l', ...),
+        # convert it to nested {"p": {...}, "p2": {...}} first.
+        params_any = _unflatten_alias_param_dict(params_any)
+
+        p_keys = [k for k in params_any.keys()
+                  if isinstance(k, str) and k.startswith("p")]
         if p_keys:
             # dict form {"p":..., "p2":..., ...}
             keys = sorted(p_keys, key=lambda s: (len(s), s))
-            raw_list = [params_any[k] if isinstance(params_any[k], dict) else asdict(params_any[k]) for k in keys]
+            raw_list = [
+                params_any[k] if isinstance(params_any[k], dict)
+                else asdict(params_any[k])
+                for k in keys
+            ]
             # resolve links across aliases with base inheritance
             raw_list_resolved = _resolve_linked_params(raw_list)
             base = AntennaParams.from_dict(raw_list_resolved[0])
@@ -458,7 +532,8 @@ def _normalize_params_sequence(params_any) -> List[AntennaParams]:
             if isinstance(v, AntennaParams):
                 raw_list.append(asdict(v))
             elif isinstance(v, dict):
-                raw_list.append(v)
+                # Also support flattened dicts inside the list
+                raw_list.append(_unflatten_alias_param_dict(v))
             else:
                 raise ValueError("List entries must be dict or AntennaParams")
         raw_list_resolved = _resolve_linked_params(raw_list)
@@ -468,7 +543,15 @@ def _normalize_params_sequence(params_any) -> List[AntennaParams]:
             out.append(base.merged_with(d))
         return out
 
-    raise ValueError("params must be dict {'p':..., 'p2':...}, a single dict/Params, or a list of dict/Params")
+    raise ValueError(
+        "params must be dict {'p':..., 'p2':...}, "
+        "a flattened alias dict {'p.ifa_h':..., 'p2.ifa_l':...}, "
+        "a single dict/Params, or a list of dict/Params"
+    )
+    
+def unflatten_param_alias_dict(flat: Dict[str, Any]) -> Dict[str, Any]:
+    """Public helper: wrapper around _unflatten_alias_param_dict."""
+    return _unflatten_alias_param_dict(flat)
 
 def build_mifa(
     params_any,
@@ -478,7 +561,7 @@ def build_mifa(
     view_model: bool = False,
     run_simulation: bool = True,
     compute_farfield: bool = True,
-    loglevel: str = "INFO",
+    loglevel: str = "ERROR",
     solver=em.EMSolver.CUDSS,
     ff_freq: Optional[float] = None,
 ) -> Tuple:
@@ -544,7 +627,7 @@ def build_mifa(
     smallest_port = min(P0.ifa_wf, P0.board_th)
 
     model.mw.set_resolution(P0.mesh_wavelength_fraction)
-    if P0.sweep_freqs is not None:
+    if P0.sweep_freqs is not None and len(P0.sweep_freqs) > 0:
         model.mw.set_frequency(P0.sweep_freqs)
     else:
         model.mw.set_frequency_range(P0.f1, P0.f2, P0.freq_points)
@@ -571,7 +654,7 @@ def build_mifa(
     if not compute_farfield:
         return model, S11, freq_dense, None, None, None
 
-    fff = ff_freq or P0.f0
+    fff = ff_freq or P0.f0 or (P0.sweep_freqs[-1]-P0.sweep_freqs[0])/2
     ff1 = data.field.find(freq=fff).farfield_2d((0, 0, 1), (1, 0, 0), air.boundary())
     ff2 = data.field.find(freq=fff).farfield_2d((0, 0, 1), (0, 1, 0), air.boundary())
     ff3d = data.field.find(freq=fff).farfield_3d(air.boundary())
