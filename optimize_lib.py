@@ -401,18 +401,6 @@ def _objective_factory(
         # --- Normalize payload to RL[dB] no matter what the simulator returned ---
         freq_dense, S11 = payload
         
-        def _as_rl_db(y: np.ndarray) -> np.ndarray:
-                """y can be RL[dB] (negative), |S11| (0..1), or complex S11."""
-                y = np.asarray(y)
-                if np.iscomplexobj(y):
-                    mag = np.abs(y)
-                    return -20.0 * np.log10(np.clip(mag, 1e-12, 1.0))
-                y = y.astype(float)
-                if np.nanmax(y) <= 1.0 and np.nanmin(y) >= 0.0:
-                    # Looks like |S11| magnitude
-                    return -20.0 * np.log10(np.clip(y, 1e-12, 1.0))
-                # Assume already RL in dB; force negative convention
-                return -np.abs(y)
         params = asdict(normalize_params_sequence(params)[0])
         print(params["sweep_freqs"])
         
@@ -438,7 +426,7 @@ def _objective_factory(
         else:
             # Numpy-ize
             freq  = np.array(freq_dense, dtype=float)
-            rl_db = _as_rl_db(np.array(S11))    # this may be negative; keep as-is for logging
+            rl_db = np.asarray(get_loss_at_freq(S11, freq, freq_dense), dtype=float)  # <=0 dB
 
             # Use *positive* RL for all math:
             rl_pos = np.abs(rl_db)  
@@ -452,7 +440,7 @@ def _objective_factory(
             # Interpolate RL at f0 for logging and (optional) center penalty
             f0 = float(params['f0'])
             f0_clamped = min(max(f0, freq.min()), freq.max())
-            rl_f0 = float(np.interp(f0_clamped, freq, rl_db))
+            rl_f0 = get_loss_at_freq(S11,f0,freq_dense)  # <=0 dB
 
             # If we have a target and span -> optimize bandwidth (band-integrated excess |Γ|)
             use_band = (bandwidth_target_db is not None) and (bandwidth_span is not None)

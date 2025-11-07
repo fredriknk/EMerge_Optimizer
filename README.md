@@ -32,8 +32,8 @@ The MIFA antenna is defined by a set of dict parameters that control its geometr
 ```
 ####################################################
 #|------------- board_wsub-------------------------|
-# ________________________________________________    _ 
-#| A             |------ifa_l(total length)----|  |\  \_ board_th          
+# ________________________________________________   _ 
+#| A             |------ifa_l(total length)----|  |\ \_ board_th          
 #| V__ifa_e_____  _______________     _________   | | A 
 #|            A  |    ___  ___   |___|  _____  |  | | |
 #|            |  |   |   ||   |_________| _ |  |__|_|_|_mifa_low_dist
@@ -177,8 +177,10 @@ params = denormalize_params_sequence_flat(normalize_parameters)
 
 ```
 
-The optimizer punishes invalid designs that violate physical constraints by assigning them a high cost, effectively steering the optimization away from those regions of the parameter space.
+The optimizer punishes invalid designs that violate physical constraints (as long as you set "validate": True) by assigning them a high cost, effectively steering the optimization away from those regions of the parameter space.
 
+When the optimizer runs it will log progress to the console, including the best parameters found so far and their corresponding performance metrics.
+When it finds new best parameters, it saves the dict to file, and you can paste them back into the demo scripts to visualize the results.
 
 ### Single Frequency MIFA Optimization
 example of single frequency optimization can be found in [demo_optimize_mifa_2450mhz.py](demo_optimize_mifa_2450mhz.py)
