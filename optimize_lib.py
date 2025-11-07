@@ -339,9 +339,12 @@ def _objective_factory(
     bandwidth_span: Optional[Tuple[float, float]] = None,
     solver_name: str = "PARDISO", timeout: float = 600.0, maxiter_hint: int = None, popsize_hint: int = None,
     stage_name: str = "default",
-    bandwidth_parameters: Optional[Dict[str, float]] = None,
+    bandwidth_parameters: Optional[Dict[str, float]],
     ):
     
+    if bandwidth_parameters is None:
+        bandwidth_parameters = {"mean_excess_weight":1.0,"max_excess_factor":0.2,"center_weighting_factor":0.2,"mean_power_weight":0.1}
+        
     var_keys = list(var_bounds_m.keys())
     state = {
         "evals": 0,
@@ -411,8 +414,9 @@ def _objective_factory(
                 # Assume already RL in dB; force negative convention
                 return -np.abs(y)
         params = asdict(normalize_params_sequence(params)[0])
-
-        if "sweep_freqs" in params:
+        print(params["sweep_freqs"])
+        
+        if "sweep_freqs" in params and params["sweep_freqs"] is not None:
             s11_db = np.asarray(get_loss_at_freq(S11, params["sweep_freqs"], freq_dense), dtype=float)  # <=0 dB
             print(f"S11 return loss (dB) at {params['sweep_freqs']/1e9} GHz: {get_loss_at_freq(S11, params['sweep_freqs'], freq_dense)} dB")
             # Convert S11(dB) -> |Γ|
@@ -430,6 +434,7 @@ def _objective_factory(
                 f"[eval {state['evals']:04d}] RL@f_sweep={rl} dB, obj={obj:.6f}"
                 + ("  [NEW BEST]" if obj < state.get("best_obj", np.inf) else "")
             )
+            
         else:
             # Numpy-ize
             freq  = np.array(freq_dense, dtype=float)
@@ -480,26 +485,21 @@ def _objective_factory(
                 band_width = float(f_hi - f_lo)
                 if band_width <= 0.0:
                     return float(penalty_if_fail)
-
-                mean_excess_weight = 1.0  # default
-                mean_excess_weight = bandwidth_parameters.get("mean_excess_weight", mean_excess_weight)
+                mean_excess_weight = bandwidth_parameters["mean_excess_weight"]
                 mean_excess = float(np.trapezoid(excess, freq[m]) / band_width)
 
                 # Robustness: small worst-case term to suppress narrow spikes
-                max_excess_factor = 0.2  # tune 0.1–0.3
-                max_excess_factor = bandwidth_parameters.get("max_excess_factor", max_excess_factor)
-                
+                max_excess_factor = bandwidth_parameters["max_excess_factor"]
+
                 max_excess = float(np.max(excess))
 
                 # Optional center weighting (very light)
-                center_weighting_factor = 0.2   # set 0.0 to disable
-                center_weighting_factor = bandwidth_parameters.get("center_weighting_factor", center_weighting_factor)
+                center_weighting_factor = bandwidth_parameters["center_weighting_factor"]
                 ex0 = float(max(_gamma_from_rl_pos_db([abs(rl_f0)])[0] - g_t, 0.0))
 
                 # Gentle preference for deeper-than-target match (smaller |Γ|^2)
                 mean_power = float(np.trapezoid(gamma2, freq[m]) / band_width)   # average |Γ|^2 over band
-                mean_power_weight = 0.1  # small weight; tune ~0.01–0.1
-                mean_power_weight = bandwidth_parameters.get("mean_power_weight", mean_power_weight)
+                mean_power_weight = bandwidth_parameters["mean_power_weight"]
 
                 obj = mean_excess_weight * mean_excess + max_excess_factor * max_excess + center_weighting_factor * ex0 + mean_power_weight * (mean_power / g2_t)  # minimize
 
@@ -508,6 +508,7 @@ def _objective_factory(
                 frac_ok = float(np.mean(rl_db[m] <= rl_spec_db))
                 rl_min_band = float(np.min(rl_db[m]))
                 rl_frequency_band = freq[m][np.argmin(rl_db[m])]
+                rl = rl_f0  # for logging
                 if log_every_eval or obj < state["best_obj"]:
                     logger.info(
                         f"[eval {state['evals']:04d}] RL@f0={rl_f0:.2f} dB, "
@@ -518,7 +519,8 @@ def _objective_factory(
                     )
             else:
                 # Fallback: minimize |Γ| at f0 (single-point)
-                gam_f0 = float(_gamma_from_rl_db(np.array([rl_f0]))[0])
+                rl = rl_f0  # for logging
+                gam_f0 = float(_gamma_from_rl_pos_db(np.array([rl_f0]))[0])
                 obj = gam_f0
                 if log_every_eval or obj < state["best_obj"]:
                     logger.info(
@@ -577,10 +579,11 @@ def append_trace(csv_path: str, stage: str, evals: int, best_rl: float, obj: flo
             f.write("stage,evals,best_rl_dB,objective,params\n")
         f.write(f"{stage},{evals},{best_rl:.3f},{obj:.6f},\"{_fmt_params_singleline_raw(params, sort_keys=False)}\"\n")
 
-def run_stage(stage_name: str, params: dict, opt_bounds: Dict[str, Tuple[float, float]],
+def global_optimizer(stage_name: str, params: dict, opt_bounds: Dict[str, Tuple[float, float]],
               *, maxiter: int, popsize: int, seed: int,
               solver_name: str, timeout: float,
-              bandwidth_target_db: float, bandwidth_span,
+              bandwidth_target_db: float = None, bandwidth_span = None,
+              bandwidth_parameters: Optional[Dict[str, float]] = None,
               include_start: bool, log_every_eval: bool):
     print(f"\n=== Stage: {stage_name} ===")
     best_params, result, summary = optimize_ifa(
@@ -594,6 +597,7 @@ def run_stage(stage_name: str, params: dict, opt_bounds: Dict[str, Tuple[float, 
         timeout=timeout,
         bandwidth_target_db=bandwidth_target_db,
         bandwidth_span=bandwidth_span,
+        bandwidth_parameters=bandwidth_parameters,
         include_start=include_start,
         log_every_eval=log_every_eval,
         stage_name=stage_name
@@ -620,6 +624,7 @@ def optimize_ifa(
     log_every_eval: bool = False,      # set True if you want every evaluation logged
     bandwidth_target_db: Optional[float] = None,
     bandwidth_span: Optional[Tuple[float, float]] = None,
+    bandwidth_parameters: Optional[Dict[str, float]] = None,
     solver_name: str = "CUDSS",
     timeout: float = 600.0,
     include_start: bool = False,        # NEW: ensure start point is evaluated
@@ -639,7 +644,8 @@ def optimize_ifa(
     start_parameters, bounds_m, logger=logger, log_every_eval=log_every_eval,
     bandwidth_target_db=bandwidth_target_db, bandwidth_span=bandwidth_span,
     solver_name=solver_name, timeout=timeout,
-    maxiter_hint=maxiter, popsize_hint=popsize, stage_name=stage_name
+    maxiter_hint=maxiter, popsize_hint=popsize, stage_name=stage_name,
+    bandwidth_parameters=bandwidth_parameters
     )
     bounds_list = [bounds_m[k] for k in var_keys]
 

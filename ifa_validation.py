@@ -24,7 +24,7 @@ def _safe_float(x: Any) -> float | None:
 def _getf(pm: Mapping[str, Any], key: str, default: Any = None) -> float | None:
     v = pm.get(key, default)
     if v is None:
-        return None
+        return default
     return _safe_float(v)
 
 def _validate_ifa_core(pm: Mapping[str, Any]) -> Tuple[List[str], List[str], Dict[str, Any]]:

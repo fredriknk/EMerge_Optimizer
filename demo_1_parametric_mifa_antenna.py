@@ -4,6 +4,7 @@ from ifalib2 import build_mifa, get_s11_at_freq, get_loss_at_freq, get_resonant_
 #from ifalib2 import AntennaParams, build_mifa
 from optimize_lib import _fmt_params_singleline_raw
 from emerge.plot import plot_sp, smith, plot_ff_polar, plot_ff
+from numpy import array
 
 """ PATCH ANTENNA DEMO
 
@@ -14,27 +15,6 @@ substrate with airbox and lumped port excitation, then visualize S-parameters
 and far-field radiation patterns. 
 
 This simulation is quite heavy and might take a while to fully compute.
-
-#############################################################
-#|------------- substrate_width -------------------|
-# _______________________________________________     _ substrate_thickness
-#| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
-#| V____          _______________     __________  | |  \_0 point
-#|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
-#|               |   |   ||     <----->      |__|_|_|_|
-#|               |   |   ||   mifa_meander    w2  | | |mifa_tipdistance(Optional, 
-#|_______________|___|___||_______________________| |_|will be set to edge distance if None)
-#| <---ifa_e---->| w1|   wf\                      | |
-#|               |__fp___|  \                     | |
-#|                       |    feed point          | |
-#|                       |                        | | substrate_length
-#|<- substrate_width/2 ->|                        | |
-#|                                                | |
-#|________________________________________________| |
-# \________________________________________________\|
-#############################################################
-Note: ifa_l is total length including meanders and tip
 """
 # --- Unit and simulation parameters --------------------------------------
 mm = 0.001              # meters per millimeter
@@ -85,7 +65,7 @@ mifa_30x110_821mhz = {
     'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 
     }
 
-parameters = mifa_21x90_2450mhz
+parameters = mifa_14x25_2450mhz
 
 parameters['f1'] = parameters['f1'] - 1e8
 parameters['f2'] = parameters['f2'] + 1e8

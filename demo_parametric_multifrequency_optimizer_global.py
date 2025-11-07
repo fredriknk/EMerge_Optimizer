@@ -1,7 +1,7 @@
 from typing import Dict, Tuple
 import numpy as np
 from ifalib2 import mm
-from optimize_lib import local_minimize_ifa ,_fmt_params_singleline_raw, write_json,run_stage
+from optimize_lib import local_minimize_ifa ,_fmt_params_singleline_raw, write_json,global_optimizer
 from datetime import datetime
 import os
 import multiprocessing as mp
@@ -57,7 +57,7 @@ def main():
     p['p.mesh_boundary_size_divisor'] = 0.33
 
     
-    best_local, result, summary = run_stage(
+    best_local, result, summary = global_optimizer(
         f"{datetime.now().strftime('%Y%m%d_%H%M')}_{SIMULATION_NAME}_global",
         p, bounds,
         maxiter=1, popsize=300, seed=1,
