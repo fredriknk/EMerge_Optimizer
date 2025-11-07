@@ -734,7 +734,7 @@ def optimize_ifa(
     model, S11, freq_dense, *_ = build_mifa(
         best_params, view_model=False, run_simulation=True, compute_farfield=False, solver=solver_enum
     )
-    rl_best = get_loss_at_freq(S11, best_params['f0'], freq_dense)
+    rl_best = get_loss_at_freq(S11, best_params['p.sweep_freqs'], freq_dense)
 
     logger.info(f"Best RL@f0 = {rl_best:.2f} dB")
     for k in var_keys:
@@ -853,7 +853,11 @@ def local_minimize_ifa(
     model, S11, freq_dense, *_ = build_mifa(
         best_params, view_model=False, run_simulation=True, compute_farfield=False, solver=solver_enum
     )
-    rl_best = get_loss_at_freq(S11, best_params['p.sweep_freqs'], freq_dense)
+    
+    query_params = 'p.f0'
+    if 'p.sweep_freqs' in best_params:
+        query_params = 'p.sweep_freqs'
+    rl_best = get_loss_at_freq(S11, best_params[query_params], freq_dense)
 
     logger.info(f"[{stage_name}] {method} done: fun={float(res.fun):.6f} "
                 f"RL@f0={rl_best:.2f} dB, iters={res.nit}, fev={res.nfev}, success={res.success}")

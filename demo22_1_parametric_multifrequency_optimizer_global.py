@@ -60,7 +60,7 @@ def main():
     best_local, result, summary = run_stage(
         f"{datetime.now().strftime('%Y%m%d_%H%M')}_{SIMULATION_NAME}_global",
         p, bounds,
-        maxiter=3, popsize=100, seed=1,
+        maxiter=1, popsize=300, seed=1,
         bandwidth_target_db=None, bandwidth_span=None,
         solver_name=SOLVER, timeout=200.0,
         include_start=False, log_every_eval=True

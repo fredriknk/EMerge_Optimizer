@@ -29,26 +29,28 @@ params= { 'p.board_wsub': 0.0191,
          'p2.mifa_tipdistance': '${p2.mifa_low_dist}', 
          'p2.shunt': 0 }
 
+params = { 'p.board_wsub': 0.0191, 'p.board_th': 0.0015, 'p.sweep_freqs': np.array([2.45e+09, 5.80e+09]), 'p.sweep_weights': np.array([1., 1.]), 'p.board_hsub': 0.06, 'p.ifa_e': 0.0005, 'p.ifa_e2': 0.000575394784, 'p.ifa_fp': 0.00272626454, 'p.ifa_h': 0.00829488465, 'p.ifa_l': 0.0234122232, 'p.ifa_te': 0.0005, 'p.ifa_w1': 0.000435609747, 'p.ifa_w2': 0.000537390996, 'p.ifa_wf': 0.00062670221, 'p.mesh_boundary_size_divisor': 0.33, 'p.mesh_wavelength_fraction': 0.2, 'p.mifa_meander': 0.0023, 'p.mifa_low_dist': '${p.ifa_h} - 0.003', 'p.mifa_tipdistance': '${p.mifa_low_dist}', 'p.via_size': 0.0005, 'p.lambda_scale': 1, 'p2.ifa_l': 0.00601520693, 'p2.ifa_h': '${p.mifa_low_dist}- 0.0005', 'p2.ifa_e': '${p.ifa_fp}', 'p2.ifa_w2': 0.000388412941, 'p2.mifa_meander': '${p2.ifa_w2}*2+0.0003', 'p2.mifa_low_dist': '${p.mifa_low_dist} - 0.003', 'p2.mifa_tipdistance': '${p2.mifa_low_dist}', 'p2.shunt': 0 }
 
 parameters = params
 
 if __name__=="__main__":
+    p = parameters.copy()
+    delta_freq = 5e8
+    p['p.lambda_scale'] = 1  # Ensure scale is 1 for frequency calculations
+    p['p.mesh_wavelength_fraction'] = 0.2
+    p['p.mesh_boundary_size_divisor'] = 0.33
+    p['p.sweep_freqs'] = np.linspace(p['p.sweep_freqs'][0]-delta_freq, p['p.sweep_freqs'][-1]+delta_freq, 20)
+
+    print(f"Main Antenna: {_fmt_params_singleline_raw(p)}")
     
-    model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(parameters,
+    model, S11, freq_dense,ff1, ff2, ff3d = build_mifa(p,
                                                    view_mesh=False, view_model=True,
                                                    run_simulation=True,compute_farfield=False,
                                                    loglevel="INFO",solver=em.EMSolver.CUDSS,)
     
     if S11 is not None:
         
-        p = parameters
-        
-        p['p.lambda_scale'] = 1  # Ensure scale is 1 for frequency calculations
-        p['p.mesh_wavelength_fraction'] = 0.2
-        p['p.mesh_boundary_size_divisor'] = 0.33
-        p['p.sweep_freqs'] = np.linspace(p['p.sweep_freqs'][0], p['p.sweep_freqs'][-1], 11)
-        
-        print(f"Main Antenna: {_fmt_params_singleline_raw(p)}")
+
         
         RL_dB = -20*np.log10(np.abs(S11))
         idx_min = np.argmax(RL_dB)
