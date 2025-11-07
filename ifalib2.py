@@ -179,7 +179,7 @@ def _build_mifa_plates(p: AntennaParams, tl) -> List[em.geo.XYPlate]:
     if length_diff > 0:
         ldiff_ratio = length_diff / (max_len_meander_y * 2.0)  # each meander adds this much normalized length
         # Continue from tip bottom-left edge
-        curr = tip_pos + np.array([0.0, tip_h, 0.0])
+        curr = tip_pos + np.array([ifa_w2, tip_h, 0.0])
 
         while ldiff_ratio > 0:
             current_meander = min(1.0, ldiff_ratio)
@@ -719,6 +719,7 @@ def build_mifa(
 
     model.mesher.set_face_size(port, smallest_port * P0.mesh_boundary_size_divisor)
     model.mesher.set_algorithm(em.Algorithm3D.HXT)
+    model.view()
     model.generate_mesh()
 
     if view_mesh:

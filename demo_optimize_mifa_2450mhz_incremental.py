@@ -1,7 +1,7 @@
 import json, os, math
 import multiprocessing as mp
 from typing import Dict, Tuple
-from optimize_lib import global_optimizer,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger,local_pattern_search_ifa , local_minimize_ifa
+from optimize_lib import write_json, mm, _fmt_params_singleline_raw, OptLogger, local_minimize_ifa
 """ MIFA OPTIMIZATION DEMO
 
 The optimizer takes a good starting point and does local optimization with
@@ -16,13 +16,13 @@ the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 """
 # Initial parameters - start point for optimization
 
-parameters = mifa_14x25_2450mhz = { 
+parameters = { 
     'ifa_h': 0.00773189309, 'ifa_l': 0.0229509148, 
     'ifa_w1': 0.000766584703, 'ifa_w2': 0.000440876843, 'ifa_wf': 0.000344665757, 
     'ifa_fp': 0.00156817497, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
     'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 
     'mifa_meander': 0.00195527223, 'mifa_low_dist': 0.00217823618, 
-    'f1': 2.4e+09, 'f0': 2.45e+09, 'f2': 2.5e+09, 'freq_points': 3, 
+    'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.7e+09, 'freq_points': 5, 
     'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
 
 epsilon_r = 4.4  # FR4 typical
@@ -78,7 +78,7 @@ def main():
         start_parameters=p,            # your seed (e.g., current best)
         optimize_parameters=bounds,      # bounds (meters)
         method="Powell",                         # or "Nelder-Mead"
-        init_step_mm=0.05,                       # “small step” knob
+        init_step_mm=0.00001,                       # “small step” knob
         maxiter=1000,
         bandwidth_target_db=10.0,               # Comment out to disable bandwidth goal
         bandwidth_parameters=bandwidth_parameters,

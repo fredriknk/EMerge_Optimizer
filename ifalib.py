@@ -299,6 +299,7 @@ def build_mifa(p,
 
     # --- Generate mesh and preview ------------------------------------------
     model.mesher.set_algorithm(em.Algorithm3D.HXT)
+    model.view()
     model.generate_mesh()
     
     if view_mesh:
