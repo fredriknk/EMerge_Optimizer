@@ -1,7 +1,7 @@
 import json, os, math
 import multiprocessing as mp
 from typing import Dict, Tuple
-from optimize_lib import run_stage,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger,local_pattern_search_ifa , local_minimize_ifa
+from optimize_lib import global_optimizer,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger,local_pattern_search_ifa , local_minimize_ifa
 """ MIFA OPTIMIZATION DEMO
 
 The optimizer takes a good starting point and does local optimization with
@@ -13,27 +13,6 @@ Its very reccomended to use a CUDA capable solver for this demo.
 
 The optimizer spawns single simulations to isolate from native chrashes
 the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
-
-#############################################################
-#|------------- substrate_width -------------------|
-# _______________________________________________     _ substrate_thickness
-#| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
-#| V____          _______________     __________  | |  \_0 point
-#|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
-#|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
-#|               |   |   ||                   w2  | | |                  
-#|_______________|___|___||_______________________| |_|
-#| <---ifa_e---->| w1|   wf\                      | |
-#|               |__fp___|  \                     | |
-#|                       |    feed point          | |
-#|                       |                        | | substrate_length
-#|<- substrate_width/2 ->|                        | |
-#|                                                | |
-#|________________________________________________| |
-# \________________________________________________\|
-#############################################################
-Note: ifa_l is total length including meanders and tip
 """
 # Initial parameters - start point for optimization
 

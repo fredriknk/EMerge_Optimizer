@@ -1,7 +1,7 @@
 import json, os, math
 import multiprocessing as mp
 from typing import Dict, Tuple
-from optimize_lib import run_stage,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger,local_pattern_search_ifa , local_minimize_ifa
+from optimize_lib import global_optimizer,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger,local_pattern_search_ifa , local_minimize_ifa
 """ MIFA OPTIMIZATION DEMO
 
 In this demo we build mifa antenna geometry and optimize it for operation
@@ -13,26 +13,6 @@ Its very reccomended to use a CUDA capable solver for this demo.
 The optimizer spawns single simulations to isolate from native chrashes
 the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 
-#############################################################
-#|------------- substrate_width -------------------|
-# _______________________________________________     _ substrate_thickness
-#| A  ifa_e      |----------ifa_l(total length)-| |\  \-gndplane_position 
-#| V____          _______________     __________  | |  \_0 point
-#|               |    ___  ___   |___|  ______  | | |
-#|         ifa_h |   |   ||   |_________|    |  |_|_|_ mifa_low_dist 
-#|               |   |   ||  mifa_meander    |__|_|_|_ mifa_tipdistance
-#|               |   |   ||                   w2  | | |                  
-#|_______________|___|___||_______________________| |_|
-#| <---ifa_e---->| w1|   wf\                      | |
-#|               |__fp___|  \                     | |
-#|                       |    feed point          | |
-#|                       |                        | | substrate_length
-#|<- substrate_width/2 ->|                        | |
-#|                                                | |
-#|________________________________________________| |
-# \________________________________________________\|
-#############################################################
-Note: ifa_l is total length including meanders and tip
 """
 
 parameters = { 'ifa_h': 0.020291324, 'ifa_l': 0.133104942, 'ifa_w1': 0.0016026077, 'ifa_w2': 0.000644213174, 'ifa_wf': 0.000883198, 'ifa_fp': 0.00797184643, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00199253282, 'mifa_low_dist': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'clearance': 0.0003, 'ifa_mifa_meander_edge_distance': 0.0125271785 }
