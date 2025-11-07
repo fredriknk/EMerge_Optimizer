@@ -1,6 +1,6 @@
 from typing import Dict, Tuple
 import numpy as np
-from ifalib import mm
+from ifalib2 import mm
 from optimize_lib import local_minimize_ifa ,_fmt_params_singleline_raw, write_json,run_stage
 from datetime import datetime
 import os
