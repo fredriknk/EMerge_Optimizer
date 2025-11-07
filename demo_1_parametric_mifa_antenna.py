@@ -44,6 +44,7 @@ mifa_21x90_2450mhz = {
     'mifa_low_dist': 0.003, 
     'mifa_tipdistance': 0.003, 
     'via_size': 0.0005,  
+    'eps_r': 3.38,
     'lambda_scale': 1 }
 
 mifa_14x25_2450mhz = { 
@@ -52,7 +53,7 @@ mifa_14x25_2450mhz = {
     'ifa_fp': 0.00156817497, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
     'via_size': 0.0003, 'board_wsub': 0.014, 'board_hsub': 0.025, 'board_th': 0.0015, 
     'mifa_meander': 0.00195527223, 'mifa_low_dist': 0.00217823618, 
-    'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.7e+09, 'freq_points': 5, 
+    'f1': 2.3e+09, 'f0': 2.45e+09, 'f2': 2.7e+09, 'freq_points': 5, 'eps_r': 3.38,
     'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1 }
 
 mifa_30x110_821mhz = { 
@@ -60,10 +61,11 @@ mifa_30x110_821mhz = {
     'ifa_w1': 0.00045360957, 'ifa_w2': 0.000439352308, 'ifa_wf': 0.000411214503, 
     'ifa_fp': 0.00722339282, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
     'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 
-    'mifa_meander': 0.00169312729, 'mifa_low_dist': 0.003, 
-    'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 
+    'mifa_meander': 0.00169312729, 'mifa_low_dist': 0.003, 'mifa_tipdistance': 0.003,
+    'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'eps_r': 3.38,
     'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 
     }
+
 
 parameters = mifa_14x25_2450mhz
 
