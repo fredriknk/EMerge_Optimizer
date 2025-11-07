@@ -1,7 +1,7 @@
 import json, os, math
 import multiprocessing as mp
 from typing import Dict, Tuple
-from optimize_lib import global_optimizer,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger,local_pattern_search_ifa , local_minimize_ifa
+from optimize_lib import global_optimizer,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger,local_minimize_ifa
 """ MIFA OPTIMIZATION DEMO
 
 In this demo we build mifa antenna geometry and optimize it for operation
@@ -15,10 +15,15 @@ the ouptut is logged to a folder best_params_log/SIMULATION_NAME_stageX.log
 
 """
 
-parameters = { 'ifa_h': 0.020291324, 'ifa_l': 0.133104942, 'ifa_w1': 0.0016026077, 'ifa_w2': 0.000644213174, 'ifa_wf': 0.000883198, 'ifa_fp': 0.00797184643, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00199253282, 'mifa_low_dist': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'clearance': 0.0003, 'ifa_mifa_meander_edge_distance': 0.0125271785 }
-parameters = { 'ifa_h': 0.0194463568, 'ifa_l': 0.113888427, 'ifa_w1': 0.000494636527, 'ifa_w2': 0.000991218277, 'ifa_wf': 0.000653610716, 'ifa_fp': 0.00515405925, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00295101104, 'mifa_low_dist': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'ifa_mifa_meander_edge_distance': 0.0147696338 }
-parameters = { 'ifa_h': 0.0220243509, 'ifa_l': 0.107128555, 'ifa_w1': 0.00045360957, 'ifa_w2': 0.000439352308, 'ifa_wf': 0.000411214503, 'ifa_fp': 0.00722339282, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 'mifa_meander': 0.00169312729, 'mifa_low_dist': 0.003, 'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 'ifa_mifa_meander_edge_distance': 0.0185312452 }
-
+parameters = { 
+    'ifa_h': 0.0230161676, 'ifa_l': 0.09415, 
+    'ifa_w1': 0.00045360957, 'ifa_w2': 0.000439352308, 'ifa_wf': 0.000411214503, 
+    'ifa_fp': 0.00722339282, 'ifa_e': 0.0005, 'ifa_e2': 0.0005, 'ifa_te': 0.0005, 
+    'via_size': 0.0005, 'board_wsub': 0.03, 'board_hsub': 0.11, 'board_th': 0.0015, 
+    'mifa_meander': 0.00169312729, 'mifa_low_dist': 0.003, 'mifa_tipdistance': 0.003,
+    'f1': 791000000, 'f0': 826000000, 'f2': 862000000, 'freq_points': 3, 'eps_r': 4.5,
+    'mesh_boundary_size_divisor': 0.33, 'mesh_wavelength_fraction': 0.2, 'lambda_scale': 1, 
+    }
 tweak_parameters = ['ifa_l', 'ifa_h', 'ifa_w1', 'ifa_w2', 'ifa_wf', 'ifa_fp', 'mifa_low_dist', 'mifa_meander']
 
 base_bounds ={}
@@ -34,7 +39,7 @@ SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
 SIMULATION_NAME = "mifa_800mhz_incremental_optimization"
-OPTIMIZATION_MODE = "BW_OPTIMIZE"
+OPTIMIZATION_MODE = "S11_OPTIMIZE"  # "BW_OPTIMIZE" or "S11_OPTIMIZE"
 
 def main():
     p = dict(parameters)
@@ -58,11 +63,6 @@ def main():
         p['f1'] = p['f0'] 
         p['f2'] = p['f0']
         p['freq_points'] = 1
-    
-    
-    p['lambda_scale'] = 1.0
-    p['mesh_wavelength_fraction'] = 0.2
-    p['mesh_boundry_size_divisor'] = 0.33
 
 
     best_local, sum_local = local_minimize_ifa(

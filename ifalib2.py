@@ -719,7 +719,6 @@ def build_mifa(
 
     model.mesher.set_face_size(port, smallest_port * P0.mesh_boundary_size_divisor)
     model.mesher.set_algorithm(em.Algorithm3D.HXT)
-    model.view()
     model.generate_mesh()
 
     if view_mesh:
