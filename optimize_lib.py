@@ -433,9 +433,6 @@ def _objective_factory(
             def _gamma_from_rl_pos_db(rl_pos_db_arr: np.ndarray) -> np.ndarray:
                 # RL_pos_dB = -20*log10|Γ|  -> |Γ| = 10^(-RL_pos/20)  (always ≤ 1)
                 return 10.0 ** (-np.asarray(rl_pos_db_arr, dtype=float) / 20.0)
-            def _gamma_from_rl_db(rl_db_arr: np.ndarray) -> np.ndarray:
-                # RL_dB = -20*log10|Γ|  -> |Γ| = 10^(-(-RL)/20) = 10^(RL/20)
-                return 10.0 ** (np.asarray(rl_db_arr, dtype=float) / 20.0)
 
             # Interpolate RL at f0 for logging and (optional) center penalty
             f0 = float(params['f0'])

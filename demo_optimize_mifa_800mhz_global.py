@@ -2,6 +2,7 @@ import json, os, math
 import multiprocessing as mp
 from typing import Dict, Tuple
 from optimize_lib import global_optimizer,shrink_bounds_around_best, write_json, mm, _fmt_params_singleline_raw, OptLogger
+from ifalib2 import build_mifa
 """ MIFA OPTIMIZATION DEMO
 
 In this demo we build mifa antenna geometry and optimize it for operation
@@ -71,6 +72,8 @@ def main():
     p['mesh_wavelength_fraction'] = 0.20
     p['mesh_boundary_size_divisor'] = 0.33
 
+    build_mifa(parameters,view_mesh=True,view_model=True,run_simulation=False)  # Test build once before optimization
+    
     best_params, result, summary = global_optimizer(
         f"{SIMULATION_NAME}_broad",
         p, bounds,

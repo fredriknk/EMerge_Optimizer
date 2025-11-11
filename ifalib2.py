@@ -23,12 +23,6 @@ from dataclasses import is_dataclass, asdict
 import math
 
 
-try:
-    # Optional: your validator
-    from ifa_validation import validate_ifa_params as _validate
-except Exception:
-    _validate = None
-
 mm = 1e-3
 
 # -----------------------------
@@ -637,6 +631,7 @@ def build_mifa(
     params_any,
     *,
     model: Optional[em.Simulation] = None,
+    view_skeleton: bool = False,
     view_mesh: bool = False,
     view_model: bool = False,
     run_simulation: bool = True,
@@ -719,6 +714,8 @@ def build_mifa(
 
     model.mesher.set_face_size(port, smallest_port * P0.mesh_boundary_size_divisor)
     model.mesher.set_algorithm(em.Algorithm3D.HXT)
+    if view_skeleton:
+        model.view()
     model.generate_mesh()
 
     if view_mesh:

@@ -38,8 +38,8 @@ for k in list(parameters.keys()):
 SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
-SIMULATION_NAME = "mifa_800mhz_incremental_optimization"
-OPTIMIZATION_MODE = "S11_OPTIMIZE"  # "BW_OPTIMIZE" or "S11_OPTIMIZE"
+SIMULATION_NAME = "mifa_800mhz_incremental_optimization2"
+OPTIMIZATION_MODE = "BW_OPTIMI" # "S11_OPTIMIZE"
 
 def main():
     p = dict(parameters)

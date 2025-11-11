@@ -4,6 +4,7 @@ from optimize_lib import local_minimize_ifa ,_fmt_params_singleline_raw, write_j
 from datetime import datetime
 import os
 import multiprocessing as mp
+from numpy import array
 
 params = { 
           'p.board_wsub': 0.0191, 'p.board_th': 0.0015,  'p.board_hsub': 0.06,
@@ -22,6 +23,9 @@ params = {
           'p2.mifa_low_dist': '${p.mifa_low_dist} - 0.003', 
           'p2.mifa_tipdistance': '${p2.mifa_low_dist}', 
           'p2.shunt': 0 }
+
+params = { 'p.ifa_h': 0.0237162003, 'p.ifa_l': 0.106715948, 'p.ifa_w1': 0.001, 'p.ifa_w2': 0.0005, 'p.ifa_wf': 0.0005, 'p.board_wsub': 0.03, 'p.board_hsub': 0.04, 'p.board_th': 0.0015, 'p.sweep_freqs': array([8.0600e+08, 8.4700e+08, 1.7475e+09, 1.8425e+09]), 'p.sweep_weights': array([1., 1., 1., 1.]), 'p.ifa_e': 0.0005, 'p.ifa_e2': 0.0005, 'p.ifa_fp': 0.00195366811, 'p.ifa_te': 0.0005, 'p.mesh_boundary_size_divisor': 0.33, 'p.mesh_wavelength_fraction': 0.2, 'p.mifa_meander': 0.00174759215, 'p.mifa_low_dist': 0.0092598482, 'p.mifa_tipdistance': '${p.mifa_low_dist}', 'p.via_size': 0.0005, 'p.lambda_scale': 0.6, 'p.validate': 1, 'p2.ifa_l': 0.0205744124, 'p2.ifa_h': 0.00574348287, 'p2.ifa_e': '${p.ifa_fp}', 'p2.ifa_w2': 0.001, 'p2.mifa_meander': 0.00218982907, 'p2.mifa_low_dist': 0.00327758215, 'p2.mifa_tipdistance': 0.001, 'p2.shunt': 0, 'p2.validate': 1 }
+
 
 normalize_parameters = normalize_params_sequence(params)
 params = denormalize_params_sequence_flat(normalize_parameters)
@@ -55,16 +59,16 @@ for k in list(params.keys()):
 SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
-SIMULATION_NAME = "mifa_2400mhz_5800mhz_optimization_incremental"
+SIMULATION_NAME = "mifa_800mhz_1800mhz_optimization_incremental"
 
 def main():
     p = dict(params)
     bounds = dict(base_bounds)
     
     
-    p['p.lambda_scale'] = 1.0
-    p['p.mesh_wavelength_fraction'] = 0.20
-    p['p.mesh_boundary_size_divisor'] = 0.33
+    p['p.lambda_scale'] = 0.6
+    p['p.mesh_wavelength_fraction'] = 0.3
+    p['p.mesh_boundary_size_divisor'] = 0.5
     
 
     best_local, sum_local = local_minimize_ifa(
