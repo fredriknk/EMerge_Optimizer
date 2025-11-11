@@ -11,7 +11,7 @@ Author: ChatGPT, Fredrik
 """
 from __future__ import annotations
 from dataclasses import dataclass, asdict, field
-from typing import Dict, Tuple, Optional, List
+from typing import Dict, Tuple, Optional, List, Set
 import numpy as np
 import emerge as em
 from dataclasses import asdict
