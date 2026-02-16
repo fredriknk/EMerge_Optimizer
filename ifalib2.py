@@ -653,7 +653,7 @@ def build_mifa(
     if model is None:
         model = em.Simulation("MultiMIFA", loglevel=loglevel)
         model.set_solver(solver)
-        model.check_version("1.1.0")
+        model.check_version("2.3.0")
 
     dielectric, air = _make_air_and_dielectric(P0)
 

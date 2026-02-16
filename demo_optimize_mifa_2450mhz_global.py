@@ -38,8 +38,8 @@ parameters = {
     'f0': 2.45e9,
     'f2': 2.5e9,
     'freq_points': 3,
-    'mesh_boundary_size_divisor': 0.4,
-    'mesh_wavelength_fraction': 0.4,
+    'mesh_boundary_size_divisor': 0.5,
+    'mesh_wavelength_fraction': 0.5,
     'lambda_scale': 0.5,
 }
 
@@ -66,7 +66,7 @@ bandwidth_parameters = {
 }
 
 
-SOLVER = "PARDISO"
+#SOLVER = "PARDISO"
 SOLVER = "CUDSS"
 
 SIMULATION_NAME = "mifa_2400mhz_optimization_Global"
@@ -77,17 +77,17 @@ def main():
     bounds = dict(BASE_BOUNDS)
 
     p['freq_points'] = 3
-    p['lambda_scale'] = 1.0
-    p['mesh_wavelength_fraction'] = 0.20
+    p['lambda_scale'] = 0.5
+    p['mesh_wavelength_fraction'] = 0.6
     p['mesh_boundary_size_divisor'] = 0.33
 
     best_params, result, summary = global_optimizer(
         f"{datetime.now().strftime('%Y%m%d_%H%M')}_{SIMULATION_NAME}",
         p, bounds,
-        maxiter=3, popsize=100, seed=1,
+        maxiter=10, popsize=100, seed=2,
         solver_name=SOLVER, timeout=200.0,
-        # bandwidth_target_db=-11.0, bandwidth_span=(p['f1'], p['f2']),
-        # bandwidth_parameters=bandwidth_parameters,
+        bandwidth_target_db=-11.0, bandwidth_span=(p['f1'], p['f2']),
+        bandwidth_parameters=bandwidth_parameters,
         include_start=False, log_every_eval=True
     )
 
