@@ -702,10 +702,12 @@ def build_mifa(
     smallest_port = min(P0.ifa_wf, P0.board_th)
 
     model.mw.set_resolution(P0.mesh_wavelength_fraction)
+    if int(P0.freq_points) <= 2:
+        model.mw.set_frequency(P0.f0)
     if P0.sweep_freqs is not None and len(P0.sweep_freqs) > 0:
         model.mw.set_frequency(P0.sweep_freqs)
     else:
-        model.mw.set_frequency_range(P0.f1, P0.f2, P0.freq_points)
+        model.mw.set_frequency_range(P0.f1, P0.f2,  int(P0.freq_points))
         
     model.mesher.set_boundary_size(ifa_union, smallest_trace * P0.mesh_boundary_size_divisor)
 
